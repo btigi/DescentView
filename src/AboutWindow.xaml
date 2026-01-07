@@ -1,0 +1,47 @@
+<Window x:Class="DescentView.AboutWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="About DescentView" 
+        Height="250" Width="400"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize">
+    <Grid Margin="20,20,20,20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" 
+                  Text="DescentView" 
+                  FontSize="24" 
+                  FontWeight="Bold" 
+                  HorizontalAlignment="Center"
+                  Margin="0,0,0,10"
+                  Foreground="{DynamicResource MahApps.Brushes.ThemeForeground}"/>
+
+        <TextBlock Grid.Row="1" 
+                  Text="Descent File Viewer" 
+                  FontSize="14" 
+                  HorizontalAlignment="Center"
+                  Margin="0,0,0,20"
+                  Foreground="{DynamicResource MahApps.Brushes.ThemeForeground}"/>
+
+        <TextBlock x:Name="VersionTextBlock" 
+                  Grid.Row="2" 
+                  TextWrapping="Wrap" 
+                  HorizontalAlignment="Center"
+                  Margin="0,0,0,20"
+                  Foreground="{DynamicResource MahApps.Brushes.ThemeForeground}"/>
+
+        <Button Grid.Row="3" 
+               Content="OK" 
+               Width="76" 
+               Height="30" 
+               HorizontalAlignment="Center"
+               Margin="0,6,0,4"
+               Click="OkButton_Click"/>
+    </Grid>
+</Window>

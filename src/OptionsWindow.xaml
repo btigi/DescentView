@@ -1,0 +1,247 @@
+<Window x:Class="DescentView.OptionsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Options" 
+        Height="620" Width="450"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Theme option -->
+        <Grid Grid.Row="0" Margin="0,0,0,15">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="100"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0" 
+                      Text="Theme:" 
+                      VerticalAlignment="Center"
+                      Foreground="{DynamicResource MahApps.Brushes.ThemeForeground}"/>
+            
+            <ComboBox x:Name="ThemeComboBox" 
+                     Grid.Column="1"
+                     SelectedIndex="0"
+                     SelectionChanged="ThemeComboBox_SelectionChanged">
+                <ComboBoxItem Content="Light"/>
+                <ComboBoxItem Content="Dark"/>
+                <ComboBoxItem Content="System"/>
+            </ComboBox>
+        </Grid>
+
+        <!-- Default view option -->
+        <Grid Grid.Row="1" Margin="0,0,0,15">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="100"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0" 
+                      Text="Default view:" 
+                      VerticalAlignment="Center"
+                      Foreground="{DynamicResource MahApps.Brushes.ThemeForeground}"/>
+            
+            <ComboBox x:Name="DefaultViewComboBox" 
+                     Grid.Column="1"
+                     SelectedIndex="0"
+                     SelectionChanged="DefaultViewComboBox_SelectionChanged">
+                <ComboBoxItem Content="Preview"/>
+                <ComboBoxItem Content="Hex"/>
+            </ComboBox>
+        </Grid>
+
+        <!-- Font option -->
+        <Grid Grid.Row="2" Margin="0,0,0,15">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="100"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0" 
+                      Text="Font:" 
+                      VerticalAlignment="Center"
+                      Foreground="{DynamicResource MahApps.Brushes.ThemeForeground}"/>
+            
+            <ComboBox x:Name="FontComboBox" 
+                     Grid.Column="1"
+                     SelectionChanged="FontComboBox_SelectionChanged"/>
+        </Grid>
+
+        <!-- Font size option -->
+        <Grid Grid.Row="3" Margin="0,0,0,15">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="100"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0" 
+                      Text="Font size:" 
+                      VerticalAlignment="Center"
+                      Foreground="{DynamicResource MahApps.Brushes.ThemeForeground}"/>
+            
+            <ComboBox x:Name="FontSizeComboBox" 
+                     Grid.Column="1"
+                     SelectionChanged="FontSizeComboBox_SelectionChanged">
+                <ComboBoxItem Content="8"/>
+                <ComboBoxItem Content="9"/>
+                <ComboBoxItem Content="10"/>
+                <ComboBoxItem Content="11"/>
+                <ComboBoxItem Content="12"/>
+                <ComboBoxItem Content="14"/>
+                <ComboBoxItem Content="16"/>
+                <ComboBoxItem Content="18"/>
+                <ComboBoxItem Content="20"/>
+                <ComboBoxItem Content="24"/>
+            </ComboBox>
+        </Grid>
+
+        <CheckBox x:Name="TntCachingCheckBox"
+                 Grid.Row="4"
+                 Content="Cache TNT map images"
+                 Margin="0,0,0,15"
+                 Checked="TntCachingCheckBox_Changed"
+                 Unchecked="TntCachingCheckBox_Changed"
+                 Foreground="{DynamicResource MahApps.Brushes.ThemeForeground}"/>
+
+        <CheckBox x:Name="AutoFitTntCheckBox"
+                 Grid.Row="5"
+                 Content="Auto-fit TNT maps to window"
+                 Margin="0,0,0,15"
+                 Checked="AutoFitTntCheckBox_Changed"
+                 Unchecked="AutoFitTntCheckBox_Changed"
+                 Foreground="{DynamicResource MahApps.Brushes.ThemeForeground}"/>
+
+        <!-- 3D Model default rotations -->
+        <TextBlock Grid.Row="6" 
+                  Text="3D Model Default Rotations:" 
+                  FontWeight="Bold"
+                  Margin="0,5,0,10"
+                  Foreground="{DynamicResource MahApps.Brushes.ThemeForeground}"/>
+
+        <Grid Grid.Row="6" Margin="0,25,0,0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="120"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="60"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Rotation X -->
+            <TextBlock Grid.Row="0" Grid.Column="0"
+                      Text="Rotation X (pitch):" 
+                      VerticalAlignment="Center"
+                      Margin="0,0,10,10"
+                      Foreground="{DynamicResource MahApps.Brushes.ThemeForeground}"/>
+            <Slider x:Name="Model3DRotationXSlider"
+                   Grid.Row="0" Grid.Column="1"
+                   Minimum="-180"
+                   Maximum="180"
+                   Value="0"
+                   TickFrequency="10"
+                   IsSnapToTickEnabled="True"
+                   VerticalAlignment="Center"
+                   Margin="0,0,10,10"
+                   ValueChanged="Model3DRotationSlider_ValueChanged"/>
+            <TextBlock x:Name="Model3DRotationXValueTextBlock"
+                      Grid.Row="0" Grid.Column="2"
+                      Text="0°"
+                      VerticalAlignment="Center"
+                      Margin="0,0,0,10"
+                      Foreground="{DynamicResource MahApps.Brushes.ThemeForeground}"/>
+
+            <!-- Rotation Y -->
+            <TextBlock Grid.Row="1" Grid.Column="0"
+                      Text="Rotation Y (yaw):" 
+                      VerticalAlignment="Center"
+                      Margin="0,0,10,15"
+                      Foreground="{DynamicResource MahApps.Brushes.ThemeForeground}"/>
+            <Slider x:Name="Model3DRotationYSlider"
+                   Grid.Row="1" Grid.Column="1"
+                   Minimum="-180"
+                   Maximum="180"
+                   Value="180"
+                   TickFrequency="10"
+                   IsSnapToTickEnabled="True"
+                   VerticalAlignment="Center"
+                   Margin="0,0,10,15"
+                   ValueChanged="Model3DRotationSlider_ValueChanged"/>
+            <TextBlock x:Name="Model3DRotationYValueTextBlock"
+                      Grid.Row="1" Grid.Column="2"
+                      Text="180°"
+                      VerticalAlignment="Center"
+                      Margin="0,0,0,15"
+                      Foreground="{DynamicResource MahApps.Brushes.ThemeForeground}"/>
+        </Grid>
+
+        <!-- Terrain HPI files -->
+        <Grid Grid.Row="7" Margin="0,0,0,15">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="100"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0" 
+                      Text="Terrain HPIs (TA:K):" 
+                      Margin="0,0,0,5"
+                      ToolTip="HPI files containing terrain textures for TA: Kingdoms"
+                      Foreground="{DynamicResource MahApps.Brushes.ThemeForeground}"/>
+            
+            <ListBox x:Name="TerrainHpiListBox" 
+                    Grid.Row="1"
+                    SelectionMode="Single"
+                    BorderThickness="1"
+                    BorderBrush="{DynamicResource MahApps.Brushes.TextBox.Border}"
+                    ToolTip="HPI files containing terrain textures for TA: Kingdoms"/>
+            
+            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,5,0,0">
+                <Button x:Name="AddTerrainHpiButton"
+                       Content="Add..."
+                       Width="75"
+                       Height="26"
+                       Padding="0"
+                       VerticalContentAlignment="Center"
+                       Margin="0,0,5,0"
+                       Click="AddTerrainHpiButton_Click"/>
+                <Button x:Name="RemoveTerrainHpiButton"
+                       Content="Remove"
+                       Width="75"
+                       Height="26"
+                       Padding="0"
+                       VerticalContentAlignment="Center"
+                       Click="RemoveTerrainHpiButton_Click"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- Buttons -->
+        <StackPanel Grid.Row="9" 
+                   Orientation="Horizontal" 
+                   HorizontalAlignment="Right">
+            <Button Content="OK" 
+                   Width="75" 
+                   Height="28"
+                   Margin="0,0,10,0"
+                   Click="OkButton_Click"/>
+            <Button Content="Cancel" 
+                   Width="75" 
+                   Height="28"
+                   Click="CancelButton_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>
+
