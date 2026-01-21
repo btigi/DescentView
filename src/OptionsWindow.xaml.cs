@@ -21,9 +21,6 @@ namespace DescentView
         private string _selectedFontFamily;
         private double _selectedFontSize;
         private bool _enableTntCaching;
-        private List<string> _terrainHpiPaths;
-        private double _model3DDefaultRotationX;
-        private double _model3DDefaultRotationY;
 
         public OptionsWindow()
         {
@@ -50,20 +47,6 @@ namespace DescentView
 
             _enableTntCaching = AppSettings.Instance.EnableTntCaching;
             TntCachingCheckBox.IsChecked = _enableTntCaching;
-
-            _terrainHpiPaths = new List<string>(AppSettings.Instance.TerrainHpiPaths);
-            foreach (var path in _terrainHpiPaths)
-            {
-                TerrainHpiListBox.Items.Add(path);
-            }
-
-            _model3DDefaultRotationX = AppSettings.Instance.Model3DDefaultRotationX;
-            Model3DRotationXSlider.Value = _model3DDefaultRotationX;
-            Model3DRotationXValueTextBlock.Text = $"{_model3DDefaultRotationX:F0}°";
-
-            _model3DDefaultRotationY = AppSettings.Instance.Model3DDefaultRotationY;
-            Model3DRotationYSlider.Value = _model3DDefaultRotationY;
-            Model3DRotationYValueTextBlock.Text = $"{_model3DDefaultRotationY:F0}°";
         }
 
         private void PopulateFontList()
@@ -162,65 +145,6 @@ namespace DescentView
             _enableTntCaching = TntCachingCheckBox.IsChecked == true;
         }
 
-        private void Model3DRotationSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-        {
-            if (sender == Model3DRotationXSlider)
-            {
-                _model3DDefaultRotationX = e.NewValue;
-                if (Model3DRotationXValueTextBlock != null)
-                {
-                    Model3DRotationXValueTextBlock.Text = $"{_model3DDefaultRotationX:F0}°";
-                }
-            }
-            else if (sender == Model3DRotationYSlider)
-            {
-                _model3DDefaultRotationY = e.NewValue;
-                if (Model3DRotationYValueTextBlock != null)
-                {
-                    Model3DRotationYValueTextBlock.Text = $"{_model3DDefaultRotationY:F0}°";
-                }
-            }
-        }
-
-        private void AddTerrainHpiButton_Click(object sender, RoutedEventArgs e)
-        {
-            var dialog = new Microsoft.Win32.OpenFileDialog
-            {
-                Filter = "HPI Files (*.hpi)|*.hpi|All Files (*.*)|*.*",
-                Title = "Select Kingdoms Terrain HPI File"
-            };
-
-            // Set initial directory based on last added file
-            if (_terrainHpiPaths.Count > 0)
-            {
-                var lastPath = _terrainHpiPaths[_terrainHpiPaths.Count - 1];
-                var directory = System.IO.Path.GetDirectoryName(lastPath);
-                if (!string.IsNullOrEmpty(directory) && System.IO.Directory.Exists(directory))
-                {
-                    dialog.InitialDirectory = directory;
-                }
-            }
-
-            if (dialog.ShowDialog() == true)
-            {
-                // Don't add duplicates
-                if (!_terrainHpiPaths.Contains(dialog.FileName, StringComparer.OrdinalIgnoreCase))
-                {
-                    _terrainHpiPaths.Add(dialog.FileName);
-                    TerrainHpiListBox.Items.Add(dialog.FileName);
-                }
-            }
-        }
-
-        private void RemoveTerrainHpiButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (TerrainHpiListBox.SelectedItem is string selectedPath)
-            {
-                _terrainHpiPaths.Remove(selectedPath);
-                TerrainHpiListBox.Items.Remove(selectedPath);
-            }
-        }
-
         private void OkButton_Click(object sender, RoutedEventArgs e)
         {
             AppSettings.Instance.Theme = _selectedTheme;
@@ -228,9 +152,6 @@ namespace DescentView
             AppSettings.Instance.FontFamily = _selectedFontFamily;
             AppSettings.Instance.FontSize = _selectedFontSize;
             AppSettings.Instance.EnableTntCaching = _enableTntCaching;
-            AppSettings.Instance.TerrainHpiPaths = new List<string>(_terrainHpiPaths);
-            AppSettings.Instance.Model3DDefaultRotationX = _model3DDefaultRotationX;
-            AppSettings.Instance.Model3DDefaultRotationY = _model3DDefaultRotationY;
             AppSettings.Instance.Save();
 
             // Apply theme
