@@ -21,7 +21,6 @@ namespace DescentView
         private string _selectedFontFamily;
         private double _selectedFontSize;
         private bool _enableTntCaching;
-        private bool _autoFitTnt;
         private List<string> _terrainHpiPaths;
         private double _model3DDefaultRotationX;
         private double _model3DDefaultRotationY;
@@ -51,9 +50,6 @@ namespace DescentView
 
             _enableTntCaching = AppSettings.Instance.EnableTntCaching;
             TntCachingCheckBox.IsChecked = _enableTntCaching;
-
-            _autoFitTnt = AppSettings.Instance.AutoFitTnt;
-            AutoFitTntCheckBox.IsChecked = _autoFitTnt;
 
             _terrainHpiPaths = new List<string>(AppSettings.Instance.TerrainHpiPaths);
             foreach (var path in _terrainHpiPaths)
@@ -166,11 +162,6 @@ namespace DescentView
             _enableTntCaching = TntCachingCheckBox.IsChecked == true;
         }
 
-        private void AutoFitTntCheckBox_Changed(object sender, RoutedEventArgs e)
-        {
-            _autoFitTnt = AutoFitTntCheckBox.IsChecked == true;
-        }
-
         private void Model3DRotationSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
             if (sender == Model3DRotationXSlider)
@@ -237,7 +228,6 @@ namespace DescentView
             AppSettings.Instance.FontFamily = _selectedFontFamily;
             AppSettings.Instance.FontSize = _selectedFontSize;
             AppSettings.Instance.EnableTntCaching = _enableTntCaching;
-            AppSettings.Instance.AutoFitTnt = _autoFitTnt;
             AppSettings.Instance.TerrainHpiPaths = new List<string>(_terrainHpiPaths);
             AppSettings.Instance.Model3DDefaultRotationX = _model3DDefaultRotationX;
             AppSettings.Instance.Model3DDefaultRotationY = _model3DDefaultRotationY;

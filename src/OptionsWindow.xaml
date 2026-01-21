@@ -115,21 +115,6 @@
                  Unchecked="TntCachingCheckBox_Changed"
                  Foreground="{DynamicResource MahApps.Brushes.ThemeForeground}"/>
 
-        <CheckBox x:Name="AutoFitTntCheckBox"
-                 Grid.Row="5"
-                 Content="Auto-fit TNT maps to window"
-                 Margin="0,0,0,15"
-                 Checked="AutoFitTntCheckBox_Changed"
-                 Unchecked="AutoFitTntCheckBox_Changed"
-                 Foreground="{DynamicResource MahApps.Brushes.ThemeForeground}"/>
-
-        <!-- 3D Model default rotations -->
-        <TextBlock Grid.Row="6" 
-                  Text="3D Model Default Rotations:" 
-                  FontWeight="Bold"
-                  Margin="0,5,0,10"
-                  Foreground="{DynamicResource MahApps.Brushes.ThemeForeground}"/>
-
         <Grid Grid.Row="6" Margin="0,25,0,0">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
