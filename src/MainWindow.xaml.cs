@@ -1,11 +1,11 @@
-using ii.CompleteDestruction;
-using ii.CompleteDestruction.Model.Hpi;
-using ii.CompleteDestruction.Model.Taf;
+using ii.Ascend;
+using ii.Ascend.Model;
 using MahApps.Metro.Controls;
 using NAudio.Wave;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -18,11 +18,17 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using System.Windows.Media.Media3D;
 using System.Windows.Threading;
 
 namespace DescentView
 {
+    public class ArchiveFileEntry
+    {
+        public string FileName { get; set; } = string.Empty;
+        public string RelativePath { get; set; } = string.Empty;
+        public byte[] Data { get; set; } = Array.Empty<byte>();
+    }
+
     // Dropped file info
     public class ExternalFileEntry
     {
@@ -77,42 +83,26 @@ namespace DescentView
 
     public partial class MainWindow : Window
     {
-        private Dictionary<TreeViewItem, HpiFileEntry> _filePathMap = new();
+        private Dictionary<TreeViewItem, ArchiveFileEntry> _filePathMap = new();
         private Dictionary<TreeViewItem, ExternalFileEntry> _externalFileMap = new();
         private HashSet<string> _deletedArchiveFiles = new(StringComparer.OrdinalIgnoreCase);
-        private Dictionary<string, BitmapSource> _tntImageCache = new(StringComparer.OrdinalIgnoreCase);
-        private string? _currentHpiFilePath;
-        private HpiArchive? _currentArchive;
-        private HpiProcessor? _currentHpiProcessor;
+        private string? _currentArchiveFilePath;
+        private List<ArchiveFileEntry>? _currentArchiveFiles;
+        private bool _isPigFile = false;
         private string? _lastOpenFolder;
         private string? _lastSaveFolder;
-
-        // Terrain HPIs for TA:K
-        private List<HpiProcessor> _terrainHpiProcessors = new();
 
         // File type filter state
         private HashSet<string> _checkedExtensions = new(StringComparer.OrdinalIgnoreCase);
 
-        // GAF navigation state
-        private List<GafImageEntry>? _currentGafEntries;
-        private int _currentGafEntryIndex = 0;
-        private int _currentGafFrameIndex = 0;
-        private byte[]? _currentGafFileData;
-
-        // TAF navigation state
-        private List<TafImageEntry>? _currentTafEntries;
-        private int _currentTafEntryIndex = 0;
-        private int _currentTafFrameIndex = 0;
-        private byte[]? _currentTafFileData;
-
-        // Palette state
+        // Palette state (for BBM images)
         private List<string> _availablePalettes = new();
         private string? _selectedPalettePath;
         private bool _isPaletteChangeInProgress = false;
 
         // Current file view state
         private byte[]? _currentFileData;
-        private HpiFileEntry? _currentFileEntry;
+        private ArchiveFileEntry? _currentFileEntry;
         private bool _isHexView = AppSettings.Instance.DefaultView == DefaultViewOption.Hex;
 
         // Audio playback state
@@ -130,12 +120,8 @@ namespace DescentView
         // Filter debouncing
         private DispatcherTimer? _filterDebounceTimer;
 
-        // 3D model state
-        private System.Windows.Point _lastMousePosition3D;
-        private bool _isRotating3D = false;
-        private double _rotationX3D = 0;
-        private double _rotationY3D = 0;
-        private double _initialCameraDistance = 500;
+        // FNT font state
+        private FontData? _currentFontData;
 
         public MainWindow(string? filePath = null)
         {
@@ -149,10 +135,6 @@ namespace DescentView
 
             ApplyFontSettings();
             OptionsWindow.FontSettingsChanged += ApplyFontSettings;
-            OptionsWindow.TerrainHpiPathChanged += LoadTerrainHpi;
-
-            // Load terrain.hpi if configured
-            LoadTerrainHpi();
 
             // Populate palette dropdown
             PopulatePaletteDropdown();
@@ -162,11 +144,11 @@ namespace DescentView
             {
                 try
                 {
-                    LoadHpiFile(filePath);
+                    LoadArchiveFile(filePath);
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Error opening HPI file:\n{ex.Message}",
+                    MessageBox.Show($"Error opening archive file:\n{ex.Message}",
                                    "Error",
                                    MessageBoxButton.OK,
                                    MessageBoxImage.Error);
@@ -181,35 +163,6 @@ namespace DescentView
             ContentTextBox.FontSize = settings.FontSize;
         }
 
-        private void LoadTerrainHpi()
-        {
-            _terrainHpiProcessors.Clear();
-
-            var terrainPaths = AppSettings.Instance.TerrainHpiPaths;
-            if (terrainPaths == null || terrainPaths.Count == 0)
-            {
-                return;
-            }
-
-            foreach (var terrainPath in terrainPaths)
-            {
-                if (string.IsNullOrEmpty(terrainPath) || !File.Exists(terrainPath))
-                {
-                    continue;
-                }
-
-                try
-                {
-                    var processor = new HpiProcessor();
-                    processor.Read(terrainPath, quickRead: true);
-                    _terrainHpiProcessors.Add(processor);
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"Error loading terrain HPI '{terrainPath}': {ex.Message}");
-                }
-            }
-        }
 
         private void PopulatePaletteDropdown()
         {
@@ -254,34 +207,27 @@ namespace DescentView
             if (_isPaletteChangeInProgress || PaletteComboBox.SelectedIndex < 0)
                 return;
 
-            if (PaletteComboBox.SelectedIndex < _availablePalettes.Count)
-            {
-                _selectedPalettePath = _availablePalettes[PaletteComboBox.SelectedIndex];
-
-                // Re-render the current file with the new palette
-                if (_currentFileData != null && _currentFileEntry != null)
+                if (PaletteComboBox.SelectedIndex < _availablePalettes.Count)
                 {
-                    var extension = Path.GetExtension(_currentFileEntry.RelativePath).ToLower();
-                    if (extension == ".gaf" || extension == ".taf" || extension == ".tnt")
-                    {
-                        // Clear cache for this file so it re-renders
-                        var cacheKey = _currentFileEntry.RelativePath;
-                        if (_tntImageCache.ContainsKey(cacheKey))
-                        {
-                            _tntImageCache.Remove(cacheKey);
-                        }
+                    _selectedPalettePath = _availablePalettes[PaletteComboBox.SelectedIndex];
 
-                        DisplayImage(_currentFileData, extension);
+                    // Re-render the current file with the new palette
+                    if (_currentFileData != null && _currentFileEntry != null)
+                    {
+                        var extension = Path.GetExtension(_currentFileEntry.RelativePath).ToLower();
+                        if (extension == ".bbm" || extension == ".iff")
+                        {
+                            DisplayImage(_currentFileData, extension);
+                        }
                     }
                 }
-            }
         }
 
         private void OpenMenuItem_Click(object sender, RoutedEventArgs e)
         {
             var dialog = new Microsoft.Win32.OpenFileDialog
             {
-                Filter = "Archive Files (*.hpi;*.ccx;*.gp3;*.ufo;*.kmp)|*.hpi;*.ccx;*.gp3;*.ufo;*.kmp|HPI Files (*.hpi)|*.hpi|CCX Files (*.ccx)|*.ccx|GP3 Files (*.gp3)|*.gp3|UFO Files (*.ufo)|*.ufo|KMP Files (*.kmp)|*.kmp|All Files (*.*)|*.*",
+                Filter = "Archive Files (*.pig;*.hog)|*.pig;*.hog|PIG Files (*.pig)|*.pig|HOG Files (*.hog)|*.hog|All Files (*.*)|*.*",
                 Title = "Open Archive File"
             };
 
@@ -302,11 +248,11 @@ namespace DescentView
 
                 try
                 {
-                    LoadHpiFile(dialog.FileName);
+                    LoadArchiveFile(dialog.FileName);
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Error opening HPI file:\n{ex.Message}",
+                    MessageBox.Show($"Error opening archive file:\n{ex.Message}",
                                    "Error",
                                    MessageBoxButton.OK,
                                    MessageBoxImage.Error);
@@ -339,9 +285,9 @@ namespace DescentView
 
         private void ExtractAllMenuItem_Click(object sender, RoutedEventArgs e)
         {
-            if (string.IsNullOrEmpty(_currentHpiFilePath))
+            if (string.IsNullOrEmpty(_currentArchiveFilePath) || _currentArchiveFiles == null)
             {
-                MessageBox.Show("No HPI file is currently open.",
+                MessageBox.Show("No archive file is currently open.",
                                "Information",
                                MessageBoxButton.OK,
                                MessageBoxImage.Information);
@@ -368,13 +314,9 @@ namespace DescentView
 
             try
             {
-                // Read all files with content
-                var processor = new HpiProcessor();
-                var archive = processor.Read(_currentHpiFilePath, false);
-
-                if (archive == null || archive.Files == null || archive.Files.Count == 0)
+                if (_currentArchiveFiles.Count == 0)
                 {
-                    MessageBox.Show("No files found in HPI archive.",
+                    MessageBox.Show("No files found in archive.",
                                    "Information",
                                    MessageBoxButton.OK,
                                    MessageBoxImage.Information);
@@ -384,7 +326,7 @@ namespace DescentView
                 int extractedCount = 0;
                 int errorCount = 0;
 
-                foreach (var file in archive.Files)
+                foreach (var file in _currentArchiveFiles)
                 {
                     try
                     {
@@ -396,7 +338,7 @@ namespace DescentView
                             Directory.CreateDirectory(targetDir);
                         }
 
-                        if (file.Data != null)
+                        if (file.Data != null && file.Data.Length > 0)
                         {
                             File.WriteAllBytes(targetPath, file.Data);
                             extractedCount++;
@@ -434,7 +376,7 @@ namespace DescentView
 
         private void SaveMenuItem_Click(object sender, RoutedEventArgs e)
         {
-            if (string.IsNullOrEmpty(_currentHpiFilePath))
+            if (string.IsNullOrEmpty(_currentArchiveFilePath))
             {
                 MessageBox.Show("No archive file is currently open.",
                                "Information",
@@ -443,12 +385,12 @@ namespace DescentView
                 return;
             }
 
-            SaveArchive(_currentHpiFilePath);
+            SaveArchive(_currentArchiveFilePath);
         }
 
         private void SaveAsMenuItem_Click(object sender, RoutedEventArgs e)
         {
-            if (string.IsNullOrEmpty(_currentHpiFilePath))
+            if (string.IsNullOrEmpty(_currentArchiveFilePath))
             {
                 MessageBox.Show("No archive file is currently open.",
                                "Information",
@@ -459,8 +401,8 @@ namespace DescentView
 
             var dialog = new Microsoft.Win32.SaveFileDialog
             {
-                FileName = Path.GetFileName(_currentHpiFilePath),
-                Filter = "HPI Files (*.hpi)|*.hpi|CCX Files (*.ccx)|*.ccx|GP3 Files (*.gp3)|*.gp3|UFO Files (*.ufo)|*.ufo|All Files (*.*)|*.*",
+                FileName = Path.GetFileName(_currentArchiveFilePath),
+                Filter = "HOG Files (*.hog)|*.hog|PIG Files (*.pig)|*.pig|All Files (*.*)|*.*",
                 Title = "Save Archive As"
             };
 
@@ -484,12 +426,12 @@ namespace DescentView
         private void UpdateSaveMenuItemState()
         {
             var hasModifications = _deletedArchiveFiles.Count > 0 || _externalFileMap.Count > 0;
-            SaveMenuItem.IsEnabled = !string.IsNullOrEmpty(_currentHpiFilePath) && hasModifications;
+            SaveMenuItem.IsEnabled = !string.IsNullOrEmpty(_currentArchiveFilePath) && hasModifications && !_isPigFile; // PIG files are read-only
         }
 
         private void SaveArchive(string outputPath)
         {
-            if (_currentArchive == null || _currentHpiProcessor == null)
+            if (_currentArchiveFiles == null)
             {
                 MessageBox.Show("No archive is currently loaded.",
                                "Error",
@@ -498,37 +440,40 @@ namespace DescentView
                 return;
             }
 
+            if (_isPigFile)
+            {
+                MessageBox.Show("PIG files are read-only and cannot be saved.",
+                               "Information",
+                               MessageBoxButton.OK,
+                               MessageBoxImage.Information);
+                return;
+            }
+
             try
             {
-                var filesToSave = new List<HpiFileEntry>();
+                var filesToSave = new List<(string filename, byte[] bytes)>();
 
-                foreach (var file in _currentArchive.Files)
+                foreach (var file in _currentArchiveFiles)
                 {
                     if (_deletedArchiveFiles.Contains(file.RelativePath))
                         continue;
 
-                    var fileData = _currentHpiProcessor.Extract(file.RelativePath);
-                    if (fileData != null)
+                    if (file.Data != null && file.Data.Length > 0)
                     {
-                        filesToSave.Add(new HpiFileEntry
-                        {
-                            RelativePath = file.RelativePath,
-                            Data = fileData
-                        });
+                        filesToSave.Add((file.RelativePath, file.Data));
                     }
                 }
 
                 foreach (var kvp in _externalFileMap)
                 {
                     var externalEntry = kvp.Value;
-                    filesToSave.Add(new HpiFileEntry
+                    if (externalEntry.Data != null && externalEntry.Data.Length > 0)
                     {
-                        RelativePath = externalEntry.RelativePath,
-                        Data = externalEntry.Data
-                    });
+                        filesToSave.Add((externalEntry.RelativePath, externalEntry.Data));
+                    }
                 }
 
-                var processor = new HpiProcessor();
+                var processor = new HogProcessor();
                 processor.Write(outputPath, filesToSave);
 
                 MessageBox.Show($"Archive saved successfully to:\n{outputPath}",
@@ -536,7 +481,7 @@ namespace DescentView
                                MessageBoxButton.OK,
                                MessageBoxImage.Information);
 
-                LoadHpiFile(outputPath);
+                LoadArchiveFile(outputPath);
             }
             catch (Exception ex)
             {
@@ -550,18 +495,17 @@ namespace DescentView
         private void SortAlphabeticallyButton_Click(object sender, RoutedEventArgs e)
         {
             // Rebuild tree with the new sort setting (no need to reload from disk)
-            if (!string.IsNullOrEmpty(_currentHpiFilePath) && _currentArchive != null)
+            if (!string.IsNullOrEmpty(_currentArchiveFilePath) && _currentArchiveFiles != null)
             {
                 BuildTreeView();
             }
         }
 
-        private async void LoadHpiFile(string filePath)
+        private async void LoadArchiveFile(string filePath)
         {
-            _currentHpiFilePath = filePath;
+            _currentArchiveFilePath = filePath;
             _deletedArchiveFiles.Clear();
             _externalFileMap.Clear();
-            _tntImageCache.Clear();
             ContentTextBox.Text = string.Empty;
             FileInfoTextBlock.Text = $"Loading: {Path.GetFileName(filePath)}...";
             Title = $"{Path.GetFileName(filePath)} - DescentView";
@@ -573,21 +517,41 @@ namespace DescentView
 
             try
             {
-                HpiArchive? archive = null;
-                HpiProcessor? processor = null;
+                List<ArchiveFileEntry>? archiveFiles = null;
+                var extension = Path.GetExtension(filePath).ToLower();
+                _isPigFile = extension == ".pig";
 
                 await Task.Run(() =>
                 {
-                    processor = new HpiProcessor();
-                    archive = processor.Read(filePath);
+                    if (_isPigFile)
+                    {
+                        var processor = new PigProcessor();
+                        var files = processor.Read(filePath);
+                        archiveFiles = files.Select(f => new ArchiveFileEntry
+                        {
+                            FileName = f.filename,
+                            RelativePath = f.filename,
+                            Data = f.bytes
+                        }).ToList();
+                    }
+                    else
+                    {
+                        var processor = new HogProcessor();
+                        var files = processor.Read(filePath);
+                        archiveFiles = files.Select(f => new ArchiveFileEntry
+                        {
+                            FileName = f.filename,
+                            RelativePath = f.filename,
+                            Data = f.bytes
+                        }).ToList();
+                    }
                 });
 
-                _currentHpiProcessor = processor;
-                _currentArchive = archive;
+                _currentArchiveFiles = archiveFiles;
 
-                if (archive == null || archive.Files == null || archive.Files.Count == 0)
+                if (archiveFiles == null || archiveFiles.Count == 0)
                 {
-                    MessageBox.Show("No files found in HPI archive.",
+                    MessageBox.Show("No files found in archive.",
                                    "Information",
                                    MessageBoxButton.OK,
                                    MessageBoxImage.Information);
@@ -603,7 +567,7 @@ namespace DescentView
 
                 // Enable menu items
                 ExtractAllMenuItem.IsEnabled = true;
-                SaveAsMenuItem.IsEnabled = true;
+                SaveAsMenuItem.IsEnabled = !_isPigFile;
                 UpdateSaveMenuItemState();
 
                 // Build tree view (already async)
@@ -611,7 +575,7 @@ namespace DescentView
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error loading HPI file:\n{ex.Message}",
+                MessageBox.Show($"Error loading archive file:\n{ex.Message}",
                                "Error",
                                MessageBoxButton.OK,
                                MessageBoxImage.Error);
@@ -621,14 +585,14 @@ namespace DescentView
 
         private void BuildFileTypeFilter()
         {
-            if (_currentArchive == null)
+            if (_currentArchiveFiles == null)
                 return;
 
             FilterCheckboxPanel.Children.Clear();
             _checkedExtensions.Clear();
 
             // Get all unique extensions, sorted alphabetically
-            var extensions = _currentArchive.Files
+            var extensions = _currentArchiveFiles
                 .Select(f => Path.GetExtension(f.RelativePath).ToUpperInvariant())
                 .Where(ext => !string.IsNullOrEmpty(ext))
                 .Distinct()
@@ -803,7 +767,7 @@ namespace DescentView
 
         private void BuildTreeView()
         {
-            if (_currentArchive == null || _currentHpiFilePath == null)
+            if (_currentArchiveFiles == null || _currentArchiveFilePath == null)
                 return;
 
             FileTreeView.Items.Clear();
@@ -815,14 +779,14 @@ namespace DescentView
             // Build tree structure
             var rootNode = new TreeViewItem
             {
-                Header = Path.GetFileName(_currentHpiFilePath),
+                Header = Path.GetFileName(_currentArchiveFilePath),
                 Tag = "ROOT"
             };
 
             // Get files, optionally sorted and filtered
             var files = sortAlphabetically
-                ? _currentArchive.Files.OrderBy(f => f.RelativePath, StringComparer.OrdinalIgnoreCase).ToList()
-                : _currentArchive.Files.ToList();
+                ? _currentArchiveFiles.OrderBy(f => f.RelativePath, StringComparer.OrdinalIgnoreCase).ToList()
+                : _currentArchiveFiles.ToList();
 
             // Filter by checked extensions
             files = files.Where(f =>
@@ -838,7 +802,7 @@ namespace DescentView
             BuildTreeViewAsync(rootNode, files);
         }
 
-        private async void BuildTreeViewAsync(TreeViewItem rootNode, List<HpiFileEntry> files)
+        private async void BuildTreeViewAsync(TreeViewItem rootNode, List<ArchiveFileEntry> files)
         {
             const int batchSize = 100;
             var directoryMap = new Dictionary<string, TreeViewItem>();
@@ -1060,7 +1024,7 @@ namespace DescentView
                 return;
 
             // Check if it's a folder via string Tag (path) or "ROOT"
-            // Files have HpiFileEntry as Tag or are in _filePathMap or _externalFileMap
+            // Files have ArchiveFileEntry as Tag or are in _filePathMap or _externalFileMap
             if (_filePathMap.ContainsKey(targetItem) || _externalFileMap.ContainsKey(targetItem))
             {
                 // This is a file - don't allow drop
@@ -1222,7 +1186,6 @@ namespace DescentView
                 TextScrollViewer.Visibility = Visibility.Visible;
                 ImageContentGrid.Visibility = Visibility.Collapsed;
                 AudioContentGrid.Visibility = Visibility.Collapsed;
-                Model3DContentGrid.Visibility = Visibility.Collapsed;
             }
         }
 
@@ -1318,7 +1281,6 @@ namespace DescentView
             TextScrollViewer.Visibility = Visibility.Visible;
             ImageContentGrid.Visibility = Visibility.Collapsed;
             AudioContentGrid.Visibility = Visibility.Collapsed;
-            Model3DContentGrid.Visibility = Visibility.Collapsed;
 
             ContentTextBox.Text = FormatHexDump(_currentFileData, _currentFileEntry.RelativePath);
             TextScrollViewer.ScrollToHome();
@@ -1334,16 +1296,16 @@ namespace DescentView
             DisplayFileContentInternal(_currentFileEntry, _currentFileData);
         }
 
-        private void DisplayFileContent(HpiFileEntry fileEntry)
+        private void DisplayFileContent(ArchiveFileEntry fileEntry)
         {
             try
             {
                 var filePath = fileEntry.RelativePath;
                 FileInfoTextBlock.Text = $"File: {filePath}";
 
-                if (_currentHpiFilePath == null || _currentArchive == null)
+                if (_currentArchiveFilePath == null || _currentArchiveFiles == null)
                 {
-                    ContentTextBox.Text = "No HPI file loaded.";
+                    ContentTextBox.Text = "No archive file loaded.";
                     ViewTogglePanel.Visibility = Visibility.Collapsed;
                     return;
                 }
@@ -1355,7 +1317,6 @@ namespace DescentView
                     TextScrollViewer.Visibility = Visibility.Visible;
                     ImageContentGrid.Visibility = Visibility.Collapsed;
                     AudioContentGrid.Visibility = Visibility.Collapsed;
-                    Model3DContentGrid.Visibility = Visibility.Collapsed;
                     ContentTextBox.Text = "(empty file)";
                     ViewTogglePanel.Visibility = Visibility.Collapsed;
                     TextScrollViewer.ScrollToHome();
@@ -1401,14 +1362,13 @@ namespace DescentView
                     TextScrollViewer.Visibility = Visibility.Visible;
                     ImageContentGrid.Visibility = Visibility.Collapsed;
                     AudioContentGrid.Visibility = Visibility.Collapsed;
-                    Model3DContentGrid.Visibility = Visibility.Collapsed;
                     ContentTextBox.Text = "(empty file)";
                     ViewTogglePanel.Visibility = Visibility.Collapsed;
                     TextScrollViewer.ScrollToHome();
                     return;
                 }
 
-                var tempEntry = new HpiFileEntry
+                var tempEntry = new ArchiveFileEntry
                 {
                     RelativePath = externalEntry.RelativePath
                 };
@@ -1434,13 +1394,12 @@ namespace DescentView
                 TextScrollViewer.Visibility = Visibility.Visible;
                 ImageContentGrid.Visibility = Visibility.Collapsed;
                 AudioContentGrid.Visibility = Visibility.Collapsed;
-                Model3DContentGrid.Visibility = Visibility.Collapsed;
                 ContentTextBox.Text = $"Error reading file:\n{ex.Message}\n\nStack trace:\n{ex.StackTrace}";
                 TextScrollViewer.ScrollToHome();
             }
         }
 
-        private void DisplayFileContentInternal(HpiFileEntry fileEntry, byte[]? fileData)
+        private void DisplayFileContentInternal(ArchiveFileEntry fileEntry, byte[]? fileData)
         {
             try
             {
@@ -1451,7 +1410,6 @@ namespace DescentView
                     TextScrollViewer.Visibility = Visibility.Visible;
                     ImageContentGrid.Visibility = Visibility.Collapsed;
                     AudioContentGrid.Visibility = Visibility.Collapsed;
-                    Model3DContentGrid.Visibility = Visibility.Collapsed;
                     ContentTextBox.Text = "(empty file)";
                     TextScrollViewer.ScrollToHome();
                     return;
@@ -1459,19 +1417,19 @@ namespace DescentView
 
                 var extension = Path.GetExtension(filePath).ToLower();
 
-                if (extension == ".wav")
+                if (extension == ".wav" || extension == ".raw")
                 {
                     DisplayAudio(fileData, extension);
                     return;
                 }
 
-                if (extension == ".3do")
+                if (extension == ".fnt")
                 {
-                    Display3DModel(fileData, extension);
+                    DisplayFont(fileData);
                     return;
                 }
 
-                if (extension == ".pcx" || extension == ".bmp" || extension == ".gaf" || extension == ".taf" || extension == ".tnt" ||
+                if (extension == ".pcx" || extension == ".bmp" || extension == ".bbm" || extension == ".iff" ||
                     extension == ".jpg" || extension == ".jpeg" || extension == ".png")
                 {
                     DisplayImage(fileData, extension);
@@ -1481,7 +1439,6 @@ namespace DescentView
                 TextScrollViewer.Visibility = Visibility.Visible;
                 ImageContentGrid.Visibility = Visibility.Collapsed;
                 AudioContentGrid.Visibility = Visibility.Collapsed;
-                Model3DContentGrid.Visibility = Visibility.Collapsed;
 
                 try
                 {
@@ -1506,16 +1463,7 @@ namespace DescentView
                             break;
 
                         case ".crt":
-                            try
-                            {
-                                var crtProcessor = new CrtProcessor();
-                                var crtFile = crtProcessor.Read(fileData);
-                                content = crtProcessor.ToJson(crtFile);
-                            }
-                            catch (Exception ex)
-                            {
-                                content = $"Error reading CRT file:\n{ex.Message}\n\nHex dump:\n\n{FormatHexDump(fileData, filePath)}";
-                            }
+                            content = FormatHexDump(fileData, filePath);
                             break;
 
                         default:
@@ -1532,7 +1480,6 @@ namespace DescentView
                     TextScrollViewer.Visibility = Visibility.Visible;
                     ImageContentGrid.Visibility = Visibility.Collapsed;
                     AudioContentGrid.Visibility = Visibility.Collapsed;
-                    Model3DContentGrid.Visibility = Visibility.Collapsed;
                     ContentTextBox.Text = $"Error processing file:\n{ex.Message}\n\nStack trace:\n{ex.StackTrace}";
                     TextScrollViewer.ScrollToHome();
                 }
@@ -1542,29 +1489,14 @@ namespace DescentView
                 TextScrollViewer.Visibility = Visibility.Visible;
                 ImageContentGrid.Visibility = Visibility.Collapsed;
                 AudioContentGrid.Visibility = Visibility.Collapsed;
-                Model3DContentGrid.Visibility = Visibility.Collapsed;
                 ContentTextBox.Text = $"Error reading file:\n{ex.Message}\n\nStack trace:\n{ex.StackTrace}";
                 TextScrollViewer.ScrollToHome();
             }
         }
 
-        private byte[]? GetFileData(HpiFileEntry fileEntry)
+        private byte[]? GetFileData(ArchiveFileEntry fileEntry)
         {
-            if (_currentHpiProcessor == null)
-            {
-                return null;
-            }
-
-            try
-            {
-                var fileData = _currentHpiProcessor.Extract(fileEntry.RelativePath);
-                return fileData;
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Error extracting file {fileEntry.RelativePath}: {ex.Message}");
-                return null;
-            }
+            return fileEntry.Data;
         }
 
 
@@ -1590,29 +1522,11 @@ namespace DescentView
 
                 TextScrollViewer.Visibility = Visibility.Collapsed;
                 AudioContentGrid.Visibility = Visibility.Collapsed;
-                Model3DContentGrid.Visibility = Visibility.Collapsed;
                 ImageContentGrid.Visibility = Visibility.Visible;
 
-                // Hide palette selector by default (GAF/TAF/TNT will show it)
+                // Hide palette selector by default (BBM/IFF will show it)
                 ShowPaletteSelector(false);
 
-                if (extension != ".gaf")
-                {
-                    _currentGafEntries = null;
-                    _currentGafFileData = null;
-                }
-
-                if (extension != ".taf")
-                {
-                    _currentTafEntries = null;
-                    _currentTafFileData = null;
-                }
-
-                if (extension != ".gaf" && extension != ".taf")
-                {
-                    PreviousFrameButton.Visibility = Visibility.Collapsed;
-                    NextFrameButton.Visibility = Visibility.Collapsed;
-                }
 
                 BitmapSource? bitmapImage = null;
                 string? imageInfo = null;
@@ -1664,135 +1578,50 @@ namespace DescentView
                     bitmapImage = pngImage;
                     imageInfo = $"PNG Image: {pngImage.PixelWidth}x{pngImage.PixelHeight}";
                 }
-                else if (extension == ".gaf")
+                else if (extension == ".bbm" || extension == ".iff")
                 {
-                    _currentGafFileData = imageData;
                     ShowPaletteSelector(true);
 
                     if (string.IsNullOrEmpty(_selectedPalettePath) || !File.Exists(_selectedPalettePath))
                     {
-                        imageInfo = "GAF File: No palette selected or palette file not found";
+                        imageInfo = "BBM/IFF File: No palette selected or palette file not found";
                     }
                     else
                     {
-                        var paletteBytes = File.ReadAllBytes(_selectedPalettePath);
-                        var paletteProcessor = new PalProcessor();
-                        paletteProcessor.Load(paletteBytes);
-
-                        var gafProcessor = new GafProcessor();
-                        var gafEntries = gafProcessor.Read(imageData, paletteProcessor);
-                        _currentGafEntries = gafEntries;
-                        _currentGafEntryIndex = 0;
-                        _currentGafFrameIndex = 0;
-
-                        DisplayGafFrame();
-                    }
-                    return;
-                }
-                else if (extension == ".taf")
-                {
-                    _currentTafFileData = imageData;
-                    ShowPaletteSelector(false);
-
-                    var tafProcessor = new TafProcessor();
-                    var tafEntries = tafProcessor.Read(imageData);
-                    _currentTafEntries = tafEntries;
-                    _currentTafEntryIndex = 0;
-                    _currentTafFrameIndex = 0;
-
-                    DisplayTafFrame();
-                    return;
-                }
-                else if (extension == ".tnt")
-                {
-                    ShowPaletteSelector(true);
-
-                    var cacheKey = _currentFileEntry?.RelativePath ?? "";
-                    var cachingEnabled = AppSettings.Instance.EnableTntCaching;
-
-                    // Include palette in cache key so different palettes have different cache entries
-                    var paletteName = Path.GetFileName(_selectedPalettePath ?? "");
-                    var fullCacheKey = $"{cacheKey}|{paletteName}";
-
-                    if (cachingEnabled && !string.IsNullOrEmpty(fullCacheKey) && _tntImageCache.TryGetValue(fullCacheKey, out var cachedImage))
-                    {
-                        bitmapImage = cachedImage;
-                        imageInfo = $"TNT Map (cached)";
-                    }
-                    else
-                    {
-                        var tntProcessor = new TntProcessor();
-
-                        if (string.IsNullOrEmpty(_selectedPalettePath) || !File.Exists(_selectedPalettePath))
+                        try
                         {
-                            imageInfo = "TNT File: No palette selected or palette file not found";
+                            // Load palette
+                            var paletteBytes = File.ReadAllBytes(_selectedPalettePath);
+                            var palette = new List<(byte red, byte green, byte blue)>();
+                            
+                            // PAL files are typically 768 bytes (256 colors * 3 bytes)
+                            if (paletteBytes.Length >= 768)
+                            {
+                                for (int i = 0; i < 256; i++)
+                                {
+                                    var offset = i * 3;
+                                    palette.Add((paletteBytes[offset], paletteBytes[offset + 1], paletteBytes[offset + 2]));
+                                }
+                            }
+
+                            if (BbmProcessor.IsIffFormat(imageData))
+                            {
+                                var bbmProcessor = new BbmProcessor();
+                                // IFF files contain their own dimensions
+                                var image = bbmProcessor.Read(imageData, 0, 0, palette);
+                                bitmapImage = ConvertImageSharpRgba32ToBitmapImage(image);
+                                imageInfo = $"IFF Image: {image.Width}x{image.Height}";
+                            }
+                            else
+                            {
+                                // For raw BBM, we need dimensions - this is a limitation
+                                // In a real scenario, these would come from PIG metadata
+                                imageInfo = "TODO: get dimensions from PIG";
+                            }
                         }
-                        else
+                        catch (Exception ex)
                         {
-                            try
-                            {
-                                var paletteBytes = File.ReadAllBytes(_selectedPalettePath);
-                                var paletteProcessor = new PalProcessor();
-                                paletteProcessor.Load(paletteBytes);
-
-                                var tntFile = tntProcessor.Read(imageData, paletteProcessor);
-
-                                if (tntFile != null)
-                                {
-                                    var isV2 = tntFile.TerrainNames != null && tntFile.TerrainNames.Count > 0;
-
-                                    if (isV2 && _terrainHpiProcessors.Count > 0)
-                                    {
-                                        var renderedMap = RenderTntV2WithTerrain(tntFile);
-                                        if (renderedMap != null)
-                                        {
-                                            bitmapImage = renderedMap;
-                                            imageInfo = $"TNT Map (Kingdoms): {tntFile.AttributeWidth * 16}x{tntFile.AttributeHeight * 16}";
-                                        }
-                                        else if (tntFile.Map != null)
-                                        {
-                                            if (tntFile.Map is Image<Rgba32> rgbaMap)
-                                            {
-                                                bitmapImage = ConvertImageSharpRgba32ToBitmapImage(rgbaMap);
-                                            }
-                                            else
-                                            {
-                                                bitmapImage = ConvertImageSharpToBitmapImage(tntFile.Map);
-                                            }
-                                            imageInfo = $"TNT Map (heightmap): {tntFile.Map.Width}x{tntFile.Map.Height}";
-                                        }
-                                    }
-                                    else if (tntFile.Map != null)
-                                    {
-                                        if (tntFile.Map is Image<Rgba32> rgbaMap)
-                                        {
-                                            bitmapImage = ConvertImageSharpRgba32ToBitmapImage(rgbaMap);
-                                        }
-                                        else
-                                        {
-                                            bitmapImage = ConvertImageSharpToBitmapImage(tntFile.Map);
-                                        }
-                                        imageInfo = $"TNT Map: {tntFile.Map.Width}x{tntFile.Map.Height}";
-                                    }
-                                    else
-                                    {
-                                        imageInfo = "TNT File: Map not available";
-                                    }
-
-                                    if (cachingEnabled && bitmapImage != null && !string.IsNullOrEmpty(fullCacheKey))
-                                    {
-                                        _tntImageCache[fullCacheKey] = bitmapImage;
-                                    }
-                                }
-                                else
-                                {
-                                    imageInfo = "TNT File: Map not available";
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                imageInfo = $"TNT File: Error loading - {ex.Message}";
-                            }
+                            imageInfo = $"BBM/IFF File: Error loading - {ex.Message}";
                         }
                     }
                 }
@@ -1805,17 +1634,12 @@ namespace DescentView
                         FileInfoTextBlock.Text = imageInfo;
                     }
 
-                    if (extension == ".tnt" && AppSettings.Instance.AutoFitTnt)
-                    {
-                        AutoFitImage(bitmapImage);
-                    }
                 }
                 else
                 {
                     TextScrollViewer.Visibility = Visibility.Visible;
                     ImageContentGrid.Visibility = Visibility.Collapsed;
                     AudioContentGrid.Visibility = Visibility.Collapsed;
-                    Model3DContentGrid.Visibility = Visibility.Collapsed;
                     ContentTextBox.Text = $"Could not display image: {extension}\n\n{imageInfo ?? ""}";
                     TextScrollViewer.ScrollToHome();
                 }
@@ -1825,7 +1649,6 @@ namespace DescentView
                 TextScrollViewer.Visibility = Visibility.Visible;
                 ImageContentGrid.Visibility = Visibility.Collapsed;
                 AudioContentGrid.Visibility = Visibility.Collapsed;
-                Model3DContentGrid.Visibility = Visibility.Collapsed;
                 ContentTextBox.Text = $"Error displaying image:\n{ex.Message}\n\nStack trace:\n{ex.StackTrace}";
                 TextScrollViewer.ScrollToHome();
             }
@@ -1857,300 +1680,6 @@ namespace DescentView
             }), System.Windows.Threading.DispatcherPriority.Loaded);
         }
 
-        private void DisplayGafFrame()
-        {
-            ContentImage.Source = null;
-
-            if (ZoomSlider != null)
-            {
-                ZoomSlider.Value = 1.0;
-            }
-            if (ImageScaleTransform != null)
-            {
-                ImageScaleTransform.ScaleX = 1.0;
-                ImageScaleTransform.ScaleY = 1.0;
-            }
-            if (ZoomValueTextBlock != null)
-            {
-                ZoomValueTextBlock.Text = "100%";
-            }
-
-            if (_currentGafEntries == null || _currentGafEntries.Count == 0)
-            {
-                TextScrollViewer.Visibility = Visibility.Visible;
-                ImageContentGrid.Visibility = Visibility.Collapsed;
-                AudioContentGrid.Visibility = Visibility.Collapsed;
-                Model3DContentGrid.Visibility = Visibility.Collapsed;
-                ContentTextBox.Text = "GAF: No entries found";
-                TextScrollViewer.ScrollToHome();
-                return;
-            }
-
-            if (_currentGafEntryIndex >= _currentGafEntries.Count)
-                _currentGafEntryIndex = 0;
-
-            var currentEntry = _currentGafEntries[_currentGafEntryIndex];
-
-            if (currentEntry.Frames == null || currentEntry.Frames.Count == 0)
-            {
-                TextScrollViewer.Visibility = Visibility.Visible;
-                ImageContentGrid.Visibility = Visibility.Collapsed;
-                AudioContentGrid.Visibility = Visibility.Collapsed;
-                ContentTextBox.Text = $"GAF: {currentEntry.Name}\nNo frames found";
-                TextScrollViewer.ScrollToHome();
-                PreviousFrameButton.Visibility = Visibility.Collapsed;
-                NextFrameButton.Visibility = Visibility.Collapsed;
-                return;
-            }
-
-            if (_currentGafFrameIndex >= currentEntry.Frames.Count)
-                _currentGafFrameIndex = 0;
-
-            var currentFrame = currentEntry.Frames[_currentGafFrameIndex];
-
-            if (currentFrame.Image != null)
-            {
-                BitmapSource? bitmapImage = null;
-
-                try
-                {
-                    if (currentFrame.Image is Image<Rgba32> rgbaImage)
-                    {
-                        bitmapImage = ConvertImageSharpRgba32ToBitmapImage(rgbaImage);
-                    }
-                    else
-                    {
-                        bitmapImage = ConvertImageSharpToBitmapImage(currentFrame.Image);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    TextScrollViewer.Visibility = Visibility.Visible;
-                    ImageContentGrid.Visibility = Visibility.Collapsed;
-                    AudioContentGrid.Visibility = Visibility.Collapsed;
-                    Model3DContentGrid.Visibility = Visibility.Collapsed;
-                    ContentTextBox.Text = $"Error converting GAF frame:\n{ex.Message}";
-                    TextScrollViewer.ScrollToHome();
-                    return;
-                }
-
-                if (bitmapImage != null)
-                {
-                    TextScrollViewer.Visibility = Visibility.Collapsed;
-                    AudioContentGrid.Visibility = Visibility.Collapsed;
-                    Model3DContentGrid.Visibility = Visibility.Collapsed;
-                    ImageContentGrid.Visibility = Visibility.Visible;
-
-                    ContentImage.Source = bitmapImage;
-
-                    var totalFrames = currentEntry.Frames.Count;
-                    var totalEntries = _currentGafEntries.Count;
-                    FileInfoTextBlock.Text = $"GAF: {currentEntry.Name}\nEntry {_currentGafEntryIndex + 1}/{totalEntries}, Frame {_currentGafFrameIndex + 1}/{totalFrames}\nSize: {currentFrame.Image.Width}x{currentFrame.Image.Height}, Offset: ({currentFrame.XOffset}, {currentFrame.YOffset}), Compressed: {currentFrame.UseCompression}";
-
-                    var hasMultipleFrames = totalFrames > 1;
-                    var hasMultipleEntries = totalEntries > 1;
-                    var showNavigation = hasMultipleFrames || hasMultipleEntries;
-
-                    PreviousFrameButton.Visibility = showNavigation ? Visibility.Visible : Visibility.Collapsed;
-                    NextFrameButton.Visibility = showNavigation ? Visibility.Visible : Visibility.Collapsed;
-                }
-                else
-                {
-                    TextScrollViewer.Visibility = Visibility.Visible;
-                    ImageContentGrid.Visibility = Visibility.Collapsed;
-                    AudioContentGrid.Visibility = Visibility.Collapsed;
-                    ContentTextBox.Text = "GAF: Could not convert frame to image";
-                    TextScrollViewer.ScrollToHome();
-                }
-            }
-        }
-
-        private void PreviousFrameButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (_currentGafEntries != null && _currentGafEntries.Count > 0)
-            {
-                var currentEntry = _currentGafEntries[_currentGafEntryIndex];
-                _currentGafFrameIndex--;
-                if (_currentGafFrameIndex < 0)
-                {
-                    _currentGafEntryIndex--;
-                    if (_currentGafEntryIndex < 0)
-                    {
-                        _currentGafEntryIndex = _currentGafEntries.Count - 1;
-                    }
-
-                    currentEntry = _currentGafEntries[_currentGafEntryIndex];
-                    _currentGafFrameIndex = currentEntry.Frames?.Count - 1 ?? 0;
-                }
-
-                DisplayGafFrame();
-            }
-            else if (_currentTafEntries != null && _currentTafEntries.Count > 0)
-            {
-                var currentEntry = _currentTafEntries[_currentTafEntryIndex];
-                _currentTafFrameIndex--;
-                if (_currentTafFrameIndex < 0)
-                {
-                    _currentTafEntryIndex--;
-                    if (_currentTafEntryIndex < 0)
-                    {
-                        _currentTafEntryIndex = _currentTafEntries.Count - 1;
-                    }
-
-                    currentEntry = _currentTafEntries[_currentTafEntryIndex];
-                    _currentTafFrameIndex = currentEntry.Frames?.Count - 1 ?? 0;
-                }
-
-                DisplayTafFrame();
-            }
-        }
-
-        private void NextFrameButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (_currentGafEntries != null && _currentGafEntries.Count > 0)
-            {
-                var currentEntry = _currentGafEntries[_currentGafEntryIndex];
-                _currentGafFrameIndex++;
-                if (currentEntry.Frames == null || _currentGafFrameIndex >= currentEntry.Frames.Count)
-                {
-                    _currentGafEntryIndex++;
-                    if (_currentGafEntryIndex >= _currentGafEntries.Count)
-                    {
-                        _currentGafEntryIndex = 0;
-                    }
-
-                    _currentGafFrameIndex = 0;
-                }
-
-                DisplayGafFrame();
-            }
-            else if (_currentTafEntries != null && _currentTafEntries.Count > 0)
-            {
-                var currentEntry = _currentTafEntries[_currentTafEntryIndex];
-                _currentTafFrameIndex++;
-                if (currentEntry.Frames == null || _currentTafFrameIndex >= currentEntry.Frames.Count)
-                {
-                    _currentTafEntryIndex++;
-                    if (_currentTafEntryIndex >= _currentTafEntries.Count)
-                    {
-                        _currentTafEntryIndex = 0;
-                    }
-
-                    _currentTafFrameIndex = 0;
-                }
-
-                DisplayTafFrame();
-            }
-        }
-
-        private void DisplayTafFrame()
-        {
-            ContentImage.Source = null;
-
-            if (ZoomSlider != null)
-            {
-                ZoomSlider.Value = 1.0;
-            }
-            if (ImageScaleTransform != null)
-            {
-                ImageScaleTransform.ScaleX = 1.0;
-                ImageScaleTransform.ScaleY = 1.0;
-            }
-            if (ZoomValueTextBlock != null)
-            {
-                ZoomValueTextBlock.Text = "100%";
-            }
-
-            if (_currentTafEntries == null || _currentTafEntries.Count == 0)
-            {
-                TextScrollViewer.Visibility = Visibility.Visible;
-                ImageContentGrid.Visibility = Visibility.Collapsed;
-                AudioContentGrid.Visibility = Visibility.Collapsed;
-                Model3DContentGrid.Visibility = Visibility.Collapsed;
-                ContentTextBox.Text = "TAF: No entries found";
-                TextScrollViewer.ScrollToHome();
-                return;
-            }
-
-            if (_currentTafEntryIndex >= _currentTafEntries.Count)
-                _currentTafEntryIndex = 0;
-
-            var currentEntry = _currentTafEntries[_currentTafEntryIndex];
-
-            if (currentEntry.Frames == null || currentEntry.Frames.Count == 0)
-            {
-                TextScrollViewer.Visibility = Visibility.Visible;
-                ImageContentGrid.Visibility = Visibility.Collapsed;
-                AudioContentGrid.Visibility = Visibility.Collapsed;
-                ContentTextBox.Text = $"TAF: {currentEntry.Name}\nNo frames found";
-                TextScrollViewer.ScrollToHome();
-                PreviousFrameButton.Visibility = Visibility.Collapsed;
-                NextFrameButton.Visibility = Visibility.Collapsed;
-                return;
-            }
-
-            if (_currentTafFrameIndex >= currentEntry.Frames.Count)
-                _currentTafFrameIndex = 0;
-
-            var currentFrame = currentEntry.Frames[_currentTafFrameIndex];
-
-            if (currentFrame.Image != null)
-            {
-                BitmapSource? bitmapImage = null;
-
-                try
-                {
-                    if (currentFrame.Image is Image<Rgba32> rgbaImage)
-                    {
-                        bitmapImage = ConvertImageSharpRgba32ToBitmapImage(rgbaImage);
-                    }
-                    else
-                    {
-                        bitmapImage = ConvertImageSharpToBitmapImage(currentFrame.Image);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    TextScrollViewer.Visibility = Visibility.Visible;
-                    ImageContentGrid.Visibility = Visibility.Collapsed;
-                    AudioContentGrid.Visibility = Visibility.Collapsed;
-                    Model3DContentGrid.Visibility = Visibility.Collapsed;
-                    ContentTextBox.Text = $"Error converting TAF frame:\n{ex.Message}";
-                    TextScrollViewer.ScrollToHome();
-                    return;
-                }
-
-                if (bitmapImage != null)
-                {
-                    TextScrollViewer.Visibility = Visibility.Collapsed;
-                    AudioContentGrid.Visibility = Visibility.Collapsed;
-                    Model3DContentGrid.Visibility = Visibility.Collapsed;
-                    ImageContentGrid.Visibility = Visibility.Visible;
-
-                    ContentImage.Source = bitmapImage;
-
-                    var totalFrames = currentEntry.Frames.Count;
-                    var totalEntries = _currentTafEntries.Count;
-                    var pixelFormatStr = currentFrame.PixelFormat == TafPixelFormat.Argb1555 ? "ARGB1555" : "ARGB4444";
-                    FileInfoTextBlock.Text = $"TAF: {currentEntry.Name}\nEntry {_currentTafEntryIndex + 1}/{totalEntries}, Frame {_currentTafFrameIndex + 1}/{totalFrames}\nSize: {currentFrame.Image.Width}x{currentFrame.Image.Height}, Offset: ({currentFrame.XOffset}, {currentFrame.YOffset}), Format: {pixelFormatStr}";
-
-                    var hasMultipleFrames = totalFrames > 1;
-                    var hasMultipleEntries = totalEntries > 1;
-                    var showNavigation = hasMultipleFrames || hasMultipleEntries;
-
-                    PreviousFrameButton.Visibility = showNavigation ? Visibility.Visible : Visibility.Collapsed;
-                    NextFrameButton.Visibility = showNavigation ? Visibility.Visible : Visibility.Collapsed;
-                }
-                else
-                {
-                    TextScrollViewer.Visibility = Visibility.Visible;
-                    ImageContentGrid.Visibility = Visibility.Collapsed;
-                    AudioContentGrid.Visibility = Visibility.Collapsed;
-                    ContentTextBox.Text = "TAF: Could not convert frame to image";
-                    TextScrollViewer.ScrollToHome();
-                }
-            }
-        }
 
         private void ZoomSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
@@ -2249,140 +1778,6 @@ namespace DescentView
             }
         }
 
-        private BitmapSource? RenderTntV2WithTerrain(TntFile tntFile)
-        {
-            if (_terrainHpiProcessors.Count == 0 || tntFile.TerrainNames == null ||
-                tntFile.UMapping == null || tntFile.VMapping == null)
-            {
-                return null;
-            }
-
-            try
-            {
-                const int GraphicUnitSize = 32;
-                const int DataUnitSize = 16;
-                const int TextureCellSize = 32; // Each UV cell is 32x32 in the 256x256 texture
-
-                // Calculate dimensions
-                var guWidth = tntFile.AttributeWidth * DataUnitSize / GraphicUnitSize;
-                var guHeight = tntFile.AttributeHeight * DataUnitSize / GraphicUnitSize;
-                var pixelWidth = guWidth * GraphicUnitSize;
-                var pixelHeight = guHeight * GraphicUnitSize;
-
-                var textureCache = new Dictionary<uint, Image<Rgba32>>();
-                var outputImage = new Image<Rgba32>(pixelWidth, pixelHeight);
-
-                for (var guY = 0; guY < guHeight; guY++)
-                {
-                    for (var guX = 0; guX < guWidth; guX++)
-                    {
-                        var guIndex = guY * guWidth + guX;
-                        if (guIndex >= tntFile.TerrainNames.Count)
-                            continue;
-
-                        var terrainName = tntFile.TerrainNames[guIndex];
-                        var u = tntFile.UMapping[guIndex];
-                        var v = tntFile.VMapping[guIndex];
-
-                        if (!textureCache.TryGetValue(terrainName, out var texture))
-                        {
-                            texture = LoadTerrainTexture(terrainName);
-                            if (texture != null)
-                            {
-                                textureCache[terrainName] = texture;
-                            }
-                        }
-
-                        if (texture == null)
-                            continue;
-
-                        // Calculate source position in texture (UV coords select 32x32 block)
-                        var srcX = u * TextureCellSize;
-                        var srcY = v * TextureCellSize;
-
-                        // Calculate destination position
-                        var destX = guX * GraphicUnitSize;
-                        var destY = guY * GraphicUnitSize;
-
-                        // Copy the 32x32 block from texture to output
-                        outputImage.ProcessPixelRows(texture, (destAccessor, srcAccessor) =>
-                        {
-                            for (int y = 0; y < GraphicUnitSize; y++)
-                            {
-                                var srcRowY = srcY + y;
-                                var destRowY = destY + y;
-
-                                if (srcRowY >= texture.Height || destRowY >= outputImage.Height)
-                                    continue;
-
-                                var srcRow = srcAccessor.GetRowSpan(srcRowY);
-                                var destRow = destAccessor.GetRowSpan(destRowY);
-
-                                for (int x = 0; x < GraphicUnitSize; x++)
-                                {
-                                    var srcColX = srcX + x;
-                                    var destColX = destX + x;
-
-                                    if (srcColX >= texture.Width || destColX >= outputImage.Width)
-                                        continue;
-
-                                    destRow[destColX] = srcRow[srcColX];
-                                }
-                            }
-                        });
-                    }
-                }
-
-                foreach (var texture in textureCache.Values)
-                {
-                    texture.Dispose();
-                }
-
-                var result = ConvertImageSharpRgba32ToBitmapImage(outputImage);
-                outputImage.Dispose();
-
-                return result;
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Error rendering TNT V2 with terrain: {ex.Message}");
-                return null;
-            }
-        }
-
-        private Image<Rgba32>? LoadTerrainTexture(uint terrainName)
-        {
-            if (_terrainHpiProcessors.Count == 0)
-                return null;
-
-            var filename = $"{terrainName:X8}.JPG";
-            var relativePath = $"terrain\\{filename}";
-            var relativePathLower = $"terrain\\{filename.ToLowerInvariant()}";
-
-            foreach (var processor in _terrainHpiProcessors)
-            {
-                try
-                {
-                    var jpgData = processor.Extract(relativePath);
-                    if (jpgData == null || jpgData.Length == 0)
-                    {
-                        jpgData = processor.Extract(relativePathLower);
-                    }
-
-                    if (jpgData != null && jpgData.Length > 0)
-                    {
-                        using var ms = new MemoryStream(jpgData);
-                        return SixLabors.ImageSharp.Image.Load<Rgba32>(ms);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"Error extracting terrain texture {terrainName:X8} from HPI: {ex.Message}");
-                }
-            }
-
-            return null;
-        }
 
         private void DisplayAudio(byte[] audioData, string extension)
         {
@@ -2401,7 +1796,20 @@ namespace DescentView
                 CurrentTimeTextBlock.Text = "00:00";
                 TotalTimeTextBlock.Text = "00:00";
 
-                var memoryStream = new MemoryStream(audioData);
+                byte[] wavData;
+                if (extension == ".raw")
+                {
+                    var rawProcessor = new RawProcessor();
+                    wavData = rawProcessor.Convert(audioData, sampleRate: 11025);
+                    FileInfoTextBlock.Text = $"RAW Audio File ({audioData.Length} bytes, converted to WAV)";
+                }
+                else
+                {
+                    wavData = audioData;
+                    FileInfoTextBlock.Text = $"WAV Audio File ({audioData.Length} bytes)";
+                }
+
+                var memoryStream = new MemoryStream(wavData);
                 _waveStream = new WaveFileReader(memoryStream);
                 _audioTotalDuration = _waveStream.TotalTime;
 
@@ -2420,14 +1828,11 @@ namespace DescentView
                 PlayButton.IsEnabled = true;
                 PauseButton.IsEnabled = false;
                 StopButton.IsEnabled = false;
-
-                FileInfoTextBlock.Text = $"WAV Audio File ({audioData.Length} bytes)";
             }
             catch (Exception ex)
             {
                 TextScrollViewer.Visibility = Visibility.Visible;
                 AudioContentGrid.Visibility = Visibility.Collapsed;
-                Model3DContentGrid.Visibility = Visibility.Collapsed;
                 ContentTextBox.Text = $"Error loading audio:\n{ex.Message}\n\nStack trace:\n{ex.StackTrace}";
                 TextScrollViewer.ScrollToHome();
 
@@ -2435,6 +1840,82 @@ namespace DescentView
                 PlayButton.IsEnabled = false;
                 PauseButton.IsEnabled = false;
                 StopButton.IsEnabled = false;
+            }
+        }
+
+        private void DisplayFont(byte[] fontData)
+        {
+            try
+            {
+                TextScrollViewer.Visibility = Visibility.Collapsed;
+                AudioContentGrid.Visibility = Visibility.Collapsed;
+                ImageContentGrid.Visibility = Visibility.Visible;
+
+                var fntProcessor = new FntProcessor();
+                var font = fntProcessor.Read(fontData);
+                _currentFontData = font;
+
+                // Create a preview image showing all characters
+                var charsPerRow = 16;
+                var charSpacing = 2;
+                var previewWidth = charsPerRow * (font.Width + charSpacing);
+                var numRows = (int)Math.Ceiling((font.MaxChar - font.MinChar + 1) / (double)charsPerRow);
+                var previewHeight = numRows * (font.Height + charSpacing);
+
+                var previewImage = new Image<Rgba32>(previewWidth, previewHeight);
+                previewImage.Mutate(x => x.BackgroundColor(new Rgba32(0, 0, 0, 255)));
+
+                int charIndex = 0;
+                for (int row = 0; row < numRows; row++)
+                {
+                    for (int col = 0; col < charsPerRow && charIndex < font.Characters.Count; col++)
+                    {
+                        var charData = font.Characters[charIndex];
+                        var xOffset = col * (font.Width + charSpacing);
+                        var yOffset = row * (font.Height + charSpacing);
+
+                        for (int y = 0; y < charData.Image.Height && yOffset + y < previewHeight; y++)
+                        {
+                            for (int x = 0; x < charData.Image.Width && xOffset + x < previewWidth; x++)
+                            {
+                                previewImage[xOffset + x, yOffset + y] = charData.Image[x, y];
+                            }
+                        }
+
+                        charIndex++;
+                    }
+                }
+
+                var bitmapImage = ConvertImageSharpRgba32ToBitmapImage(previewImage);
+                ContentImage.Source = bitmapImage;
+
+                var isColor = (font.Flags & 1) != 0;
+                var isProportional = (font.Flags & 2) != 0;
+                var isKerned = (font.Flags & 4) != 0;
+                FileInfoTextBlock.Text = $"FNT Font: {font.Width}x{font.Height}, Chars: {font.MinChar}-{font.MaxChar} ({font.Characters.Count} total)\n" +
+                    $"Color: {isColor}, Proportional: {isProportional}, Kerned: {isKerned}";
+
+                if (ZoomSlider != null)
+                {
+                    ZoomSlider.Value = 1.0;
+                }
+                if (ImageScaleTransform != null)
+                {
+                    ImageScaleTransform.ScaleX = 1.0;
+                    ImageScaleTransform.ScaleY = 1.0;
+                }
+                if (ZoomValueTextBlock != null)
+                {
+                    ZoomValueTextBlock.Text = "100%";
+                }
+            }
+            catch (Exception ex)
+            {
+                TextScrollViewer.Visibility = Visibility.Visible;
+                ImageContentGrid.Visibility = Visibility.Collapsed;
+                AudioContentGrid.Visibility = Visibility.Collapsed;
+                ContentTextBox.Text = $"Error displaying font:\n{ex.Message}\n\nStack trace:\n{ex.StackTrace}";
+                TextScrollViewer.ScrollToHome();
             }
         }
 
@@ -2674,224 +2155,8 @@ namespace DescentView
             return sb.ToString();
         }
 
-        private void Display3DModel(byte[] modelData, string extension)
-        {
-            try
-            {
-                StopAudio(disposeResources: true);
 
-                TextScrollViewer.Visibility = Visibility.Collapsed;
-                ImageContentGrid.Visibility = Visibility.Collapsed;
-                AudioContentGrid.Visibility = Visibility.Collapsed;
-                Model3DContentGrid.Visibility = Visibility.Visible;
 
-                var processor = new ThreeDOProcessor();
-                var threeDOFile = processor.Read(modelData);
-
-                if (threeDOFile?.RootObject == null)
-                {
-                    TextScrollViewer.Visibility = Visibility.Visible;
-                    Model3DContentGrid.Visibility = Visibility.Collapsed;
-                    ContentTextBox.Text = "Error: Could not parse 3DO file";
-                    TextScrollViewer.ScrollToHome();
-                    return;
-                }
-
-                var model3DGroup = ThreeDOConverter.ConvertToModel3DGroup(threeDOFile.RootObject);
-
-                if (model3DGroup.Children.Count == 0)
-                {
-                    TextScrollViewer.Visibility = Visibility.Visible;
-                    Model3DContentGrid.Visibility = Visibility.Collapsed;
-                    ContentTextBox.Text = "3DO file contains no renderable geometry";
-                    TextScrollViewer.ScrollToHome();
-                    return;
-                }
-
-                // Calculate model bounds to center and scale
-                var bounds = CalculateModelBounds(model3DGroup);
-                var center = new Point3D(
-                    (bounds.Item1.X + bounds.Item2.X) / 2,
-                    (bounds.Item1.Y + bounds.Item2.Y) / 2,
-                    (bounds.Item1.Z + bounds.Item2.Z) / 2
-                );
-
-                // Center
-                var centerTransform = new TranslateTransform3D(-center.X, -center.Y, -center.Z);
-                model3DGroup.Transform = centerTransform;
-
-                // Camera distance
-                var size = new Vector3D(
-                    bounds.Item2.X - bounds.Item1.X,
-                    bounds.Item2.Y - bounds.Item1.Y,
-                    bounds.Item2.Z - bounds.Item1.Z
-                );
-                var maxDimension = Math.Max(Math.Max(size.X, size.Y), size.Z);
-                _initialCameraDistance = maxDimension * 2.5;
-
-                // Reset camera
-                _rotationX3D = AppSettings.Instance.Model3DDefaultRotationX;
-                _rotationY3D = AppSettings.Instance.Model3DDefaultRotationY;
-                ResetCamera3D();
-
-                var rotateTransformGroup = new Transform3DGroup();
-                rotateTransformGroup.Children.Add(centerTransform);
-                rotateTransformGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), _rotationX3D)));
-                rotateTransformGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), _rotationY3D)));
-                model3DGroup.Transform = rotateTransformGroup;
-
-                Model3DContainer.Content = model3DGroup;
-
-                Model3DViewport.MouseLeftButtonDown += Model3DViewport_MouseLeftButtonDown;
-                Model3DViewport.MouseMove += Model3DViewport_MouseMove;
-                Model3DViewport.MouseLeftButtonUp += Model3DViewport_MouseLeftButtonUp;
-                Model3DViewport.MouseWheel += Model3DViewport_MouseWheel;
-
-                UpdateModel3DRotation();
-
-                FileInfoTextBlock.Text = ThreeDOConverter.GetModelInfo(threeDOFile);
-            }
-            catch (Exception ex)
-            {
-                TextScrollViewer.Visibility = Visibility.Visible;
-                Model3DContentGrid.Visibility = Visibility.Collapsed;
-                ContentTextBox.Text = $"Error displaying 3D model:\n{ex.Message}\n\nStack trace:\n{ex.StackTrace}";
-                TextScrollViewer.ScrollToHome();
-            }
-        }
-
-        private (Point3D, Point3D) CalculateModelBounds(Model3DGroup modelGroup)
-        {
-            double minX = double.MaxValue, minY = double.MaxValue, minZ = double.MaxValue;
-            double maxX = double.MinValue, maxY = double.MinValue, maxZ = double.MinValue;
-
-            foreach (var child in modelGroup.Children)
-            {
-                if (child is GeometryModel3D geometryModel && geometryModel.Geometry is MeshGeometry3D mesh)
-                {
-                    foreach (var position in mesh.Positions)
-                    {
-                        minX = Math.Min(minX, position.X);
-                        minY = Math.Min(minY, position.Y);
-                        minZ = Math.Min(minZ, position.Z);
-                        maxX = Math.Max(maxX, position.X);
-                        maxY = Math.Max(maxY, position.Y);
-                        maxZ = Math.Max(maxZ, position.Z);
-                    }
-                }
-            }
-
-            return (new Point3D(minX, minY, minZ), new Point3D(maxX, maxY, maxZ));
-        }
-
-        private void ResetCamera3D()
-        {
-            if (Camera3D != null)
-            {
-                Camera3D.Position = new Point3D(0, 0, _initialCameraDistance);
-                Camera3D.LookDirection = new Vector3D(0, 0, -1);
-                Camera3D.UpDirection = new Vector3D(0, 1, 0);
-                Camera3D.FieldOfView = 60;
-
-                if (Model3DZoomSlider != null)
-                {
-                    Model3DZoomSlider.Value = 1.0;
-                    Model3DZoomSlider.Minimum = 0.1;
-                    Model3DZoomSlider.Maximum = 10.0;
-                }
-            }
-        }
-
-        private void ResetCameraButton_Click(object sender, RoutedEventArgs e)
-        {
-            _rotationX3D = AppSettings.Instance.Model3DDefaultRotationX;
-            _rotationY3D = AppSettings.Instance.Model3DDefaultRotationY;
-            ResetCamera3D();
-            UpdateModel3DRotation();
-        }
-
-        private void Model3DZoomSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-        {
-            if (Camera3D != null && _initialCameraDistance > 0)
-            {
-                var cameraDistance = _initialCameraDistance / e.NewValue;
-                Camera3D.Position = new Point3D(0, 0, cameraDistance);
-
-                if (Model3DZoomValueTextBlock != null)
-                {
-                    var zoomPercent = (int)(e.NewValue * 100);
-                    Model3DZoomValueTextBlock.Text = $"{zoomPercent}%";
-                }
-            }
-        }
-
-        private void Model3DViewport_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-        {
-            _isRotating3D = true;
-            _lastMousePosition3D = e.GetPosition(Model3DViewport);
-            Model3DViewport.CaptureMouse();
-        }
-
-        private void Model3DViewport_MouseMove(object sender, MouseEventArgs e)
-        {
-            if (_isRotating3D && e.LeftButton == MouseButtonState.Pressed)
-            {
-                var currentPosition = e.GetPosition(Model3DViewport);
-                var delta = currentPosition - _lastMousePosition3D;
-
-                _rotationY3D += delta.X * 0.5;
-                _rotationX3D += delta.Y * 0.5;
-
-                // Keep rotation in reasonable bounds
-                _rotationX3D = Math.Max(-89, Math.Min(89, _rotationX3D));
-
-                UpdateModel3DRotation();
-
-                _lastMousePosition3D = currentPosition;
-            }
-        }
-
-        private void Model3DViewport_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
-        {
-            _isRotating3D = false;
-            Model3DViewport.ReleaseMouseCapture();
-        }
-
-        private void Model3DViewport_MouseWheel(object sender, MouseWheelEventArgs e)
-        {
-            if (Model3DZoomSlider != null)
-            {
-                var delta = e.Delta > 0 ? 0.05 : -0.05;
-                var newValue = Model3DZoomSlider.Value + delta;
-                newValue = Math.Max(Model3DZoomSlider.Minimum, Math.Min(Model3DZoomSlider.Maximum, newValue));
-                Model3DZoomSlider.Value = newValue;
-            }
-        }
-
-        private void UpdateModel3DRotation()
-        {
-            if (Model3DContainer.Content is Model3DGroup modelGroup)
-            {
-                var transforms = new Transform3DGroup();
-
-                if (modelGroup.Transform is Transform3DGroup existingGroup && existingGroup.Children.Count > 0)
-                {
-                    transforms.Children.Add(existingGroup.Children[0]); // Keep center transform
-                }
-                else if (modelGroup.Transform is TranslateTransform3D existingTranslate)
-                {
-                    transforms.Children.Add(existingTranslate);
-                }
-
-                transforms.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), _rotationX3D)));
-                transforms.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), _rotationY3D)));
-
-                modelGroup.Transform = transforms;
-            }
-
-            RotationXValueTextBlock?.Text = $"{_rotationX3D:F1}°";
-            RotationYValueTextBlock?.Text = $"{_rotationY3D:F1}°";
-        }
 
         protected override void OnClosed(EventArgs e)
         {

@@ -5,15 +5,14 @@
     <TargetFramework>net10.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <UseWPF>true</UseWPF>
-    <Version>1.0.0</Version>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.0.0</FileVersion>
+	  <Version>1.0.0</Version>
+	  <AssemblyVersion>1.0.0.0</AssemblyVersion>
+	  <FileVersion>1.0.0.0</FileVersion>
     <ApplicationIcon>icon.ico</ApplicationIcon>
   </PropertyGroup>
 
 
   <ItemGroup>
-    <PackageReference Include="ii.CompleteDestruction" Version="0.9.5" />
     <PackageReference Include="MahApps.Metro" Version="2.4.10" />
     <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
