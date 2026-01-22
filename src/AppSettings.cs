@@ -25,7 +25,6 @@ namespace DescentView
         public DefaultViewOption DefaultView { get; set; } = DefaultViewOption.Preview;
         public string FontFamily { get; set; } = "Consolas";
         public double FontSize { get; set; } = 12;
-        public bool EnableTntCaching { get; set; } = true;
 
         private static readonly string SettingsFolder = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

@@ -107,14 +107,6 @@
             </ComboBox>
         </Grid>
 
-        <CheckBox x:Name="TntCachingCheckBox"
-                 Grid.Row="4"
-                 Content="Cache TNT map images"
-                 Margin="0,0,0,15"
-                 Checked="TntCachingCheckBox_Changed"
-                 Unchecked="TntCachingCheckBox_Changed"
-                 Foreground="{DynamicResource MahApps.Brushes.ThemeForeground}"/>
-
         <!-- Buttons -->
         <StackPanel Grid.Row="9" 
                    Orientation="Horizontal" 
