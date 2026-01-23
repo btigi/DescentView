@@ -1446,24 +1446,21 @@ namespace DescentView
 
                     switch (extension)
                     {
-                        case ".tsf":
-                        case ".tdf":
-                        case ".fbi":
-                        case ".gui":
-                        case ".ota":
-                        case ".txt":
-                        case ".bat":
-                        case ".ini":
-                        case ".cfg":
-                        case ".bos":
-                        case ".h":
-                        case ".pl":
+                        case ".sng":
                             var encoding = Encoding.GetEncoding(1252);
                             content = encoding.GetString(fileData);
                             break;
 
-                        case ".crt":
-                            content = FormatHexDump(fileData, filePath);
+                        case ".txb":
+                            try
+                            {
+                                var txbProcessor = new TxbProcessor();
+                                content = txbProcessor.Read(fileData);
+                            }
+                            catch (Exception ex)
+                            {
+                                content = $"Error reading TXB file:\n{ex.Message}\n\nHex dump:\n\n{FormatHexDump(fileData, filePath)}";
+                            }
                             break;
 
                         default:
