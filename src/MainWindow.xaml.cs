@@ -1436,6 +1436,12 @@ namespace DescentView
                     return;
                 }
 
+                if (extension == ".256")
+                {
+                    DisplayPalette(fileData);
+                    return;
+                }
+
                 TextScrollViewer.Visibility = Visibility.Visible;
                 ImageContentGrid.Visibility = Visibility.Collapsed;
                 AudioContentGrid.Visibility = Visibility.Collapsed;
@@ -1912,6 +1918,73 @@ namespace DescentView
                 ImageContentGrid.Visibility = Visibility.Collapsed;
                 AudioContentGrid.Visibility = Visibility.Collapsed;
                 ContentTextBox.Text = $"Error displaying font:\n{ex.Message}\n\nStack trace:\n{ex.StackTrace}";
+                TextScrollViewer.ScrollToHome();
+            }
+        }
+
+        private void DisplayPalette(byte[] paletteData)
+        {
+            try
+            {
+                TextScrollViewer.Visibility = Visibility.Collapsed;
+                AudioContentGrid.Visibility = Visibility.Collapsed;
+                ImageContentGrid.Visibility = Visibility.Visible;
+
+                var processor = new TwoFiveSixProcessor();
+                var paletteFile = processor.Read(paletteData);
+
+                // Create a 16x16 grid of colors (256 total)
+                var colorsPerRow = 16;
+                var colorSize = 24; // Each color swatch is 24x24 pixels
+                var previewWidth = colorsPerRow * colorSize;
+                var previewHeight = colorsPerRow * colorSize;
+
+                var previewImage = new Image<Rgba32>(previewWidth, previewHeight);
+
+                for (int i = 0; i < 256; i++)
+                {
+                    var (red, green, blue) = paletteFile.Palette[i];
+                    var color = new Rgba32(red, green, blue, 255);
+
+                    var col = i % colorsPerRow;
+                    var row = i / colorsPerRow;
+                    var xStart = col * colorSize;
+                    var yStart = row * colorSize;
+
+                    for (int y = yStart; y < yStart + colorSize; y++)
+                    {
+                        for (int x = xStart; x < xStart + colorSize; x++)
+                        {
+                            previewImage[x, y] = color;
+                        }
+                    }
+                }
+
+                var bitmapImage = ConvertImageSharpRgba32ToBitmapImage(previewImage);
+                ContentImage.Source = bitmapImage;
+
+                FileInfoTextBlock.Text = $"256-Color Palette: {paletteData.Length} bytes (768 bytes palette + 8704 bytes fade table)";
+
+                if (ZoomSlider != null)
+                {
+                    ZoomSlider.Value = 1.0;
+                }
+                if (ImageScaleTransform != null)
+                {
+                    ImageScaleTransform.ScaleX = 1.0;
+                    ImageScaleTransform.ScaleY = 1.0;
+                }
+                if (ZoomValueTextBlock != null)
+                {
+                    ZoomValueTextBlock.Text = "100%";
+                }
+            }
+            catch (Exception ex)
+            {
+                TextScrollViewer.Visibility = Visibility.Visible;
+                ImageContentGrid.Visibility = Visibility.Collapsed;
+                AudioContentGrid.Visibility = Visibility.Collapsed;
+                ContentTextBox.Text = $"Error displaying palette:\n{ex.Message}\n\nStack trace:\n{ex.StackTrace}";
                 TextScrollViewer.ScrollToHome();
             }
         }
