@@ -27,6 +27,11 @@ namespace DescentView
 		public string FileName { get; set; } = string.Empty;
 		public string RelativePath { get; set; } = string.Empty;
 		public byte[] Data { get; set; } = Array.Empty<byte>();
+		// PIG image metadata (for BBM rendering)
+		public short Width { get; set; }
+		public short Height { get; set; }
+		public bool IsRleCompressed { get; set; }
+		public byte Flags { get; set; }
 	}
 
 	// Dropped file info
@@ -526,13 +531,24 @@ namespace DescentView
 					if (_isPigFile)
 					{
 						var processor = new PigProcessor();
-						var files = processor.Read(filePath);
-						archiveFiles = files.Select(f => new ArchiveFileEntry
+						var (images, sounds) = processor.ReadDetailed(filePath);
+						archiveFiles = images.Select(img => new ArchiveFileEntry
 						{
-							FileName = f.filename,
-							RelativePath = f.filename,
-							Data = f.bytes
+							FileName = img.Filename,
+							RelativePath = img.Filename,
+							Data = img.Data,
+							Width = img.Width,
+							Height = img.Height,
+							IsRleCompressed = img.IsRleCompressed,
+							Flags = img.Flags
 						}).ToList();
+						// Add sounds to archive files
+						archiveFiles.AddRange(sounds.Select(s => new ArchiveFileEntry
+						{
+							FileName = s.Filename,
+							RelativePath = s.Filename,
+							Data = s.Data
+						}));
 					}
 					else
 					{
@@ -1599,25 +1615,31 @@ namespace DescentView
 
 							if (string.IsNullOrEmpty(_selectedPalettePath) || !File.Exists(_selectedPalettePath))
 							{
-								imageInfo = "BBM/IFF File: No palette selected or palette file not found";
+								imageInfo = "BBM File: No palette selected or palette file not found";
+							}
+							else if (_currentFileEntry == null || (_currentFileEntry.Width == 0 && _currentFileEntry.Height == 0))
+							{
+								imageInfo = "BBM File: No dimension metadata available";
 							}
 							else
 							{
 								// Load palette
 								var paletteBytes = File.ReadAllBytes(_selectedPalettePath);
-								var palette = new List<(byte red, byte green, byte blue)>();
+								var paletteProcessor = new TwoFiveSixProcessor();
+								var paletteFile = paletteProcessor.Read(paletteBytes);
+								var palette = paletteFile.Palette.Select(p => (p.red, p.green, p.blue)).ToList();
 
-								// PAL files are typically 768 bytes (256 colors * 3 bytes)
-								if (paletteBytes.Length >= 768)
-								{
-									for (int i = 0; i < 256; i++)
-									{
-										var offset = i * 3;
-										palette.Add((paletteBytes[offset], paletteBytes[offset + 1], paletteBytes[offset + 2]));
-									}
-								}
-
-								imageInfo = "TODO: get dimensions from PIG";
+								var bbmProcessor = new BbmProcessor();
+								var image = bbmProcessor.Read(
+									imageData,
+									_currentFileEntry.Width,
+									_currentFileEntry.Height,
+									palette,
+									_currentFileEntry.IsRleCompressed,
+									_currentFileEntry.Flags);
+								bitmapImage = ConvertImageSharpRgba32ToBitmapImage(image);
+								imageInfo = $"BBM Image: {_currentFileEntry.Width}x{_currentFileEntry.Height}" +
+									(_currentFileEntry.IsRleCompressed ? " (RLE)" : "");
 							}
 						}
 					}
