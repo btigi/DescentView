@@ -1465,11 +1465,15 @@ namespace DescentView
 				try
 				{
 					string content;
-
+					var encoding = Encoding.GetEncoding(1252);
 					switch (extension)
 					{
+						case ".msn":
+						case ".mn2":
+							content = encoding.GetString(fileData);
+							break;
+
 						case ".sng":
-							var encoding = Encoding.GetEncoding(1252);
 							content = encoding.GetString(fileData);
 							break;
 
