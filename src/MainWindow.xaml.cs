@@ -1,6 +1,7 @@
 using ii.Ascend;
 using ii.Ascend.Model;
 using MahApps.Metro.Controls;
+using MeltySynth;
 using NAudio.Wave;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Png;
@@ -15,7 +16,6 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -127,6 +127,11 @@ namespace DescentView
 
 		// FNT font state
 		private FontData? _currentFontData;
+
+		// MIDI playback state
+		private Synthesizer? _midiSynthesizer;
+		private MidiFileSequencer? _midiSequencer;
+		private MidiSampleProvider? _midiSampleProvider;
 
 		public MainWindow(string? filePath = null)
 		{
@@ -1439,6 +1444,12 @@ namespace DescentView
 					return;
 				}
 
+				if (extension == ".mid")
+				{
+					DisplayMidi(fileData);
+					return;
+				}
+
 				if (extension == ".fnt")
 				{
 					DisplayFont(fileData);
@@ -1458,13 +1469,14 @@ namespace DescentView
 					return;
 				}
 
-				TextScrollViewer.Visibility = Visibility.Visible;
-				ImageContentGrid.Visibility = Visibility.Collapsed;
-				AudioContentGrid.Visibility = Visibility.Collapsed;
+			ShowPaletteSelector(false);
+			TextScrollViewer.Visibility = Visibility.Visible;
+			ImageContentGrid.Visibility = Visibility.Collapsed;
+			AudioContentGrid.Visibility = Visibility.Collapsed;
 
-				try
-				{
-					string content;
+			try
+			{
+				string content;
 					var encoding = Encoding.GetEncoding(1252);
 					switch (extension)
 					{
@@ -1812,6 +1824,7 @@ namespace DescentView
 			{
 				StopAudio(disposeResources: true);
 
+				ShowPaletteSelector(false);
 				TextScrollViewer.Visibility = Visibility.Collapsed;
 				ImageContentGrid.Visibility = Visibility.Collapsed;
 				AudioContentGrid.Visibility = Visibility.Visible;
@@ -1870,10 +1883,77 @@ namespace DescentView
 			}
 		}
 
+		private void DisplayMidi(byte[] midiData)
+		{
+			try
+			{
+				StopAudio(disposeResources: true);
+
+				ShowPaletteSelector(false);
+				TextScrollViewer.Visibility = Visibility.Collapsed;
+				ImageContentGrid.Visibility = Visibility.Collapsed;
+				AudioContentGrid.Visibility = Visibility.Visible;
+
+				PlayButton.IsEnabled = false;
+				PauseButton.IsEnabled = false;
+				StopButton.IsEnabled = false;
+				AudioPositionSlider.Value = 0;
+				CurrentTimeTextBlock.Text = "00:00";
+				TotalTimeTextBlock.Text = "00:00";
+
+				// Find the SoundFont file
+				var exeDirectory = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+				var soundFontPath = Path.Combine(exeDirectory ?? "", "soundfonts\\Yamaha DB50XG Presets.sf2");
+
+				if (!File.Exists(soundFontPath))
+				{
+					throw new FileNotFoundException($"SoundFont file not found: {soundFontPath}");
+				}
+
+				var sampleRate = 44100;
+				var soundFont = new SoundFont(soundFontPath);
+				_midiSynthesizer = new Synthesizer(soundFont, sampleRate);
+
+				using var midiStream = new MemoryStream(midiData);
+				var midiFile = new MidiFile(midiStream);
+
+				_midiSequencer = new MidiFileSequencer(_midiSynthesizer);
+				_midiSampleProvider = new MidiSampleProvider(_midiSynthesizer, _midiSequencer, midiFile);
+
+				_audioTotalDuration = midiFile.Length;
+
+				_waveOut = new WaveOutEvent();
+				_waveOut.Init(_midiSampleProvider);
+				_waveOut.PlaybackStopped += WaveOut_PlaybackStopped;
+
+				TotalTimeTextBlock.Text = FormatTimeSpan(_audioTotalDuration);
+				AudioPositionSlider.Maximum = _audioTotalDuration.TotalSeconds;
+
+				FileInfoTextBlock.Text = $"MIDI File ({midiData.Length} bytes)";
+
+				PlayButton.IsEnabled = true;
+				PauseButton.IsEnabled = false;
+				StopButton.IsEnabled = false;
+			}
+			catch (Exception ex)
+			{
+				TextScrollViewer.Visibility = Visibility.Visible;
+				AudioContentGrid.Visibility = Visibility.Collapsed;
+				ContentTextBox.Text = $"Error loading MIDI:\n{ex.Message}\n\nStack trace:\n{ex.StackTrace}";
+				TextScrollViewer.ScrollToHome();
+
+				StopAudio(disposeResources: true);
+				PlayButton.IsEnabled = false;
+				PauseButton.IsEnabled = false;
+				StopButton.IsEnabled = false;
+			}
+		}
+
 		private void DisplayFont(byte[] fontData)
 		{
 			try
 			{
+				ShowPaletteSelector(false);
 				TextScrollViewer.Visibility = Visibility.Collapsed;
 				AudioContentGrid.Visibility = Visibility.Collapsed;
 				ImageContentGrid.Visibility = Visibility.Visible;
@@ -1950,6 +2030,7 @@ namespace DescentView
 		{
 			try
 			{
+				ShowPaletteSelector(false);
 				TextScrollViewer.Visibility = Visibility.Collapsed;
 				AudioContentGrid.Visibility = Visibility.Collapsed;
 				ImageContentGrid.Visibility = Visibility.Visible;
@@ -2037,8 +2118,13 @@ namespace DescentView
 
 		private void PlayButton_Click(object sender, RoutedEventArgs e)
 		{
-			if (_waveOut != null && _waveStream != null)
+			if (_waveOut != null)
 			{
+				if (_midiSampleProvider != null && !_midiSampleProvider.IsPlaying)
+				{
+					_midiSampleProvider.Play(loop: true);
+				}
+
 				_waveOut.Play();
 				PlayButton.IsEnabled = false;
 				PauseButton.IsEnabled = true;
@@ -2108,6 +2194,18 @@ namespace DescentView
 						_fadeOutProvider?.Reset();
 					}
 				}
+
+				if (disposeResources)
+				{
+					_midiSampleProvider?.Stop();
+					_midiSequencer = null;
+					_midiSampleProvider = null;
+					_midiSynthesizer = null;
+				}
+				else if (_midiSampleProvider != null)
+				{
+					_midiSampleProvider.Stop();
+				}
 			}
 			catch { }
 
@@ -2144,7 +2242,22 @@ namespace DescentView
 
 		private void AudioPositionTimer_Tick(object? sender, EventArgs e)
 		{
-			if (!_isDraggingAudioSlider && _waveStream != null)
+			if (_isDraggingAudioSlider)
+				return;
+
+			if (_midiSampleProvider != null)
+			{
+				var position = _midiSampleProvider.CurrentTime;
+				CurrentTimeTextBlock.Text = FormatTimeSpan(position);
+				AudioPositionSlider.Value = position.TotalSeconds;
+
+				// Check if MIDI playback has finished (for non-looping)
+				if (!_midiSampleProvider.IsPlaying && _waveOut?.PlaybackState == PlaybackState.Playing)
+				{
+					StopAudio();
+				}
+			}
+			else if (_waveStream != null)
 			{
 				var position = _waveStream.CurrentTime;
 				CurrentTimeTextBlock.Text = FormatTimeSpan(position);
@@ -2159,18 +2272,26 @@ namespace DescentView
 
 		private void AudioPositionSlider_PreviewMouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
 		{
-			if (_isDraggingAudioSlider && _waveStream != null)
+			if (!_isDraggingAudioSlider)
+				return;
+
+			_isDraggingAudioSlider = false;
+			var newPosition = TimeSpan.FromSeconds(AudioPositionSlider.Value);
+			CurrentTimeTextBlock.Text = FormatTimeSpan(newPosition);
+
+			if (_midiSampleProvider != null)
 			{
-				_isDraggingAudioSlider = false;
-				var newPosition = TimeSpan.FromSeconds(AudioPositionSlider.Value);
+				_midiSampleProvider.Seek(newPosition);
+			}
+			else if (_waveStream != null)
+			{
 				_waveStream.CurrentTime = newPosition;
-				CurrentTimeTextBlock.Text = FormatTimeSpan(newPosition);
 			}
 		}
 
 		private void AudioPositionSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
 		{
-			if (_isDraggingAudioSlider && _waveStream != null)
+			if (_isDraggingAudioSlider && (_waveStream != null || _midiSampleProvider != null))
 			{
 				var newPosition = TimeSpan.FromSeconds(e.NewValue);
 				CurrentTimeTextBlock.Text = FormatTimeSpan(newPosition);
