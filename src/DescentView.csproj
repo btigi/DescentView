@@ -26,4 +26,14 @@
   <ItemGroup>
     <Resource Include="icon.ico" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="palettes\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="palettes\descent.256">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 </Project>
