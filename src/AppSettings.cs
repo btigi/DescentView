@@ -25,6 +25,7 @@ namespace DescentView
         public DefaultViewOption DefaultView { get; set; } = DefaultViewOption.Preview;
         public string FontFamily { get; set; } = "Consolas";
         public double FontSize { get; set; } = 12;
+        public string SoundFontPath { get; set; } = string.Empty;
 
         private static readonly string SettingsFolder = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

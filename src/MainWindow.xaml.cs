@@ -132,6 +132,8 @@ namespace DescentView
 		private Synthesizer? _midiSynthesizer;
 		private MidiFileSequencer? _midiSequencer;
 		private MidiSampleProvider? _midiSampleProvider;
+		private MidiFile? _currentMidiFile;
+		private byte[]? _currentMidiFileData;
 
 		public MainWindow(string? filePath = null)
 		{
@@ -1901,35 +1903,38 @@ namespace DescentView
 				CurrentTimeTextBlock.Text = "00:00";
 				TotalTimeTextBlock.Text = "00:00";
 
-				// Find the SoundFont file
-				var exeDirectory = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
-				var soundFontPath = Path.Combine(exeDirectory ?? "", "soundfonts\\Yamaha DB50XG Presets.sf2");
+				string soundFontPath;
+				if (string.IsNullOrEmpty(AppSettings.Instance.SoundFontPath))
+				{
+					var exeDirectory = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+					soundFontPath = Path.Combine(exeDirectory ?? "", "soundfonts", "Yamaha DB50XG Presets.sf2");
+				}
+				else
+				{
+					soundFontPath = AppSettings.Instance.SoundFontPath;
+				}
 
 				if (!File.Exists(soundFontPath))
 				{
 					throw new FileNotFoundException($"SoundFont file not found: {soundFontPath}");
 				}
 
-				var sampleRate = 44100;
-				var soundFont = new SoundFont(soundFontPath);
-				_midiSynthesizer = new Synthesizer(soundFont, sampleRate);
-
+				// Store MIDI file data for later playback (don't create synthesizer yet)
 				using var midiStream = new MemoryStream(midiData);
-				var midiFile = new MidiFile(midiStream);
+				_currentMidiFile = new MidiFile(midiStream);
+				_currentMidiFileData = midiData;
 
-				_midiSequencer = new MidiFileSequencer(_midiSynthesizer);
-				_midiSampleProvider = new MidiSampleProvider(_midiSynthesizer, _midiSequencer, midiFile);
-
-				_audioTotalDuration = midiFile.Length;
-
-				_waveOut = new WaveOutEvent();
-				_waveOut.Init(_midiSampleProvider);
-				_waveOut.PlaybackStopped += WaveOut_PlaybackStopped;
+				_audioTotalDuration = _currentMidiFile.Length;
 
 				TotalTimeTextBlock.Text = FormatTimeSpan(_audioTotalDuration);
 				AudioPositionSlider.Maximum = _audioTotalDuration.TotalSeconds;
 
 				FileInfoTextBlock.Text = $"MIDI File ({midiData.Length} bytes)";
+
+				if (_waveOut == null)
+				{
+					_waveOut = new WaveOutEvent();
+				}
 
 				PlayButton.IsEnabled = true;
 				PauseButton.IsEnabled = false;
@@ -2118,7 +2123,54 @@ namespace DescentView
 
 		private void PlayButton_Click(object sender, RoutedEventArgs e)
 		{
-			if (_waveOut != null)
+			if (_currentMidiFile != null && _currentMidiFileData != null)
+			{
+				if (_midiSynthesizer != null)
+				{
+					_midiSampleProvider = null;
+					_midiSequencer = null;
+					_midiSynthesizer = null;
+				}
+
+				string soundFontPath;
+				if (string.IsNullOrEmpty(AppSettings.Instance.SoundFontPath))
+				{
+					var exeDirectory = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+					soundFontPath = Path.Combine(exeDirectory ?? "", "soundfonts", "Yamaha DB50XG Presets.sf2");
+				}
+				else
+				{
+					soundFontPath = AppSettings.Instance.SoundFontPath;
+				}
+
+				if (File.Exists(soundFontPath))
+				{
+					var sampleRate = 44100;
+					var soundFont = new SoundFont(soundFontPath);
+					_midiSynthesizer = new Synthesizer(soundFont, sampleRate);
+
+					_midiSequencer = new MidiFileSequencer(_midiSynthesizer);
+					_midiSampleProvider = new MidiSampleProvider(_midiSynthesizer, _midiSequencer, _currentMidiFile);
+
+					if (_waveOut != null)
+					{
+						_waveOut.Stop();
+						_waveOut.Dispose();
+					}
+					_waveOut = new WaveOutEvent();
+					_waveOut.Init(_midiSampleProvider);
+					_waveOut.PlaybackStopped += WaveOut_PlaybackStopped;
+
+					_midiSampleProvider.Play(loop: true);
+					_waveOut.Play();
+					PlayButton.IsEnabled = false;
+					PauseButton.IsEnabled = true;
+					StopButton.IsEnabled = true;
+
+					StartAudioPositionTimer();
+				}
+			}
+			else if (_waveOut != null)
 			{
 				if (_midiSampleProvider != null && !_midiSampleProvider.IsPlaying)
 				{
@@ -2201,6 +2253,8 @@ namespace DescentView
 					_midiSequencer = null;
 					_midiSampleProvider = null;
 					_midiSynthesizer = null;
+					_currentMidiFile = null;
+					_currentMidiFileData = null;
 				}
 				else if (_midiSampleProvider != null)
 				{

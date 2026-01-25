@@ -1,11 +1,12 @@
 using System;
-using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
+using Microsoft.Win32;
 
 namespace DescentView
 {
@@ -20,6 +21,7 @@ namespace DescentView
         private DefaultViewOption _selectedDefaultView;
         private string _selectedFontFamily;
         private double _selectedFontSize;
+        private string _selectedSoundFontPath;
 
         public OptionsWindow()
         {
@@ -43,6 +45,9 @@ namespace DescentView
 
             _selectedFontSize = AppSettings.Instance.FontSize;
             SelectFontSize(_selectedFontSize);
+
+            _selectedSoundFontPath = AppSettings.Instance.SoundFontPath;
+            UpdateSoundFontDisplay();
         }
 
         private void PopulateFontList()
@@ -136,12 +141,55 @@ namespace DescentView
             }
         }
 
+        private void UpdateSoundFontDisplay()
+        {
+            if (string.IsNullOrEmpty(_selectedSoundFontPath))
+            {
+                var exeDirectory = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+                var defaultPath = Path.Combine(exeDirectory ?? "", "soundfonts", "Yamaha DB50XG Presets.sf2");
+                if (File.Exists(defaultPath))
+                {
+                    SoundFontTextBox.Text = "Yamaha DB50XG Presets.sf2 (Default)";
+                }
+                else
+                {
+                    SoundFontTextBox.Text = "(Default - not found)";
+                }
+            }
+            else
+            {
+                SoundFontTextBox.Text = Path.GetFileName(_selectedSoundFontPath);
+            }
+        }
+
+        private void SoundFontBrowseButton_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new OpenFileDialog
+            {
+                Filter = "SoundFont Files (*.sf2)|*.sf2|All Files (*.*)|*.*",
+                Title = "Select SoundFont File"
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                _selectedSoundFontPath = dialog.FileName;
+                UpdateSoundFontDisplay();
+            }
+        }
+
+        private void SoundFontTextBox_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            _selectedSoundFontPath = string.Empty;
+            UpdateSoundFontDisplay();
+        }
+
         private void OkButton_Click(object sender, RoutedEventArgs e)
         {
             AppSettings.Instance.Theme = _selectedTheme;
             AppSettings.Instance.DefaultView = _selectedDefaultView;
             AppSettings.Instance.FontFamily = _selectedFontFamily;
             AppSettings.Instance.FontSize = _selectedFontSize;
+            AppSettings.Instance.SoundFontPath = _selectedSoundFontPath;
             AppSettings.Instance.Save();
 
             // Apply theme
