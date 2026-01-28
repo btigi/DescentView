@@ -135,6 +135,10 @@ namespace DescentView
 		private MidiFile? _currentMidiFile;
 		private byte[]? _currentMidiFileData;
 
+		// Game data state (for PIG files)
+		private D1PigGameData? _currentGameData;
+		private Dictionary<TreeViewItem, D1PigGameData> _gameDataMap = new();
+
 		public MainWindow(string? filePath = null)
 		{
 			InitializeComponent();
@@ -338,6 +342,21 @@ namespace DescentView
 				int extractedCount = 0;
 				int errorCount = 0;
 
+				if (_currentGameData != null)
+				{
+					try
+					{
+						var gameDataPath = Path.Combine(targetFolder, "game-data.txt");
+						var textContent = FormatGameDataAsText(_currentGameData);
+						File.WriteAllText(gameDataPath, textContent, Encoding.UTF8);
+						extractedCount++;
+					}
+					catch
+					{
+						errorCount++;
+					}
+				}
+
 				foreach (var file in _currentArchiveFiles)
 				{
 					try
@@ -518,6 +537,8 @@ namespace DescentView
 			_currentArchiveFilePath = filePath;
 			_deletedArchiveFiles.Clear();
 			_externalFileMap.Clear();
+			_currentGameData = null;
+			_gameDataMap.Clear();
 			ContentTextBox.Text = string.Empty;
 			FileInfoTextBlock.Text = $"Loading: {Path.GetFileName(filePath)}...";
 			Title = $"{Path.GetFileName(filePath)} - DescentView";
@@ -538,7 +559,10 @@ namespace DescentView
 					if (_isPigFile)
 					{
 						var processor = new PigProcessor();
-						var (images, sounds) = processor.ReadDetailed(filePath);
+						var (images, sounds, data) = processor.ReadDetailed(filePath);
+						
+						_currentGameData = data;
+						
 						archiveFiles = images.Select(img => new ArchiveFileEntry
 						{
 							FileName = img.Filename,
@@ -796,6 +820,7 @@ namespace DescentView
 			FileTreeView.Items.Clear();
 			_filePathMap.Clear();
 			_externalFileMap.Clear();
+			_gameDataMap.Clear();
 
 			var sortAlphabetically = SortAlphabeticallyButton.IsChecked == true;
 
@@ -832,6 +857,29 @@ namespace DescentView
 
 			FileTreeView.Items.Add(rootNode);
 			rootNode.IsExpanded = true;
+
+			// Add game data entry at the top if available
+			if (_currentGameData != null)
+			{
+				var gameDataNode = new TreeViewItem
+				{
+					Header = "<game-data>",
+					Tag = "GAMEDATA"
+				};
+
+				var contextMenu = new ContextMenu();
+				var extractMenuItem = new MenuItem
+				{
+					Header = "Extract",
+					Tag = gameDataNode
+				};
+				extractMenuItem.Click += ExtractMenuItem_Click;
+				contextMenu.Items.Add(extractMenuItem);
+				gameDataNode.ContextMenu = contextMenu;
+
+				rootNode.Items.Insert(0, gameDataNode);
+				_gameDataMap[gameDataNode] = _currentGameData;
+			}
 
 			int processed = 0;
 
@@ -928,7 +976,11 @@ namespace DescentView
 
 			if (e.NewValue is TreeViewItem selectedItem)
 			{
-				if (_filePathMap.TryGetValue(selectedItem, out var fileEntry))
+				if (selectedItem.Tag is string tag && tag == "GAMEDATA" && _gameDataMap.TryGetValue(selectedItem, out var gameData))
+				{
+					DisplayGameData(gameData);
+				}
+				else if (_filePathMap.TryGetValue(selectedItem, out var fileEntry))
 				{
 					DisplayFileContent(fileEntry);
 				}
@@ -1217,6 +1269,49 @@ namespace DescentView
 			if (sender is not MenuItem menuItem || menuItem.Tag is not TreeViewItem treeViewItem)
 				return;
 
+			// Check if this is game data
+			if (treeViewItem.Tag is string tag && tag == "GAMEDATA" && _gameDataMap.TryGetValue(treeViewItem, out var gameData))
+			{
+				var dialog = new Microsoft.Win32.SaveFileDialog
+				{
+					FileName = "game-data.txt",
+					Filter = "Text Files (*.txt)|*.txt|All Files (*.*)|*.*",
+					Title = "Extract Game Data"
+				};
+
+				if (!string.IsNullOrEmpty(_lastSaveFolder) && Directory.Exists(_lastSaveFolder))
+				{
+					dialog.InitialDirectory = _lastSaveFolder;
+				}
+
+				if (dialog.ShowDialog() == true)
+				{
+					var folder = Path.GetDirectoryName(dialog.FileName);
+					if (!string.IsNullOrEmpty(folder))
+					{
+						_lastSaveFolder = folder;
+					}
+
+					try
+					{
+						var textContent = FormatGameDataAsText(gameData);
+						File.WriteAllText(dialog.FileName, textContent, Encoding.UTF8);
+						MessageBox.Show($"Game data extracted successfully to:\n{dialog.FileName}",
+									   "Success",
+									   MessageBoxButton.OK,
+									   MessageBoxImage.Information);
+					}
+					catch (Exception ex)
+					{
+						MessageBox.Show($"Error extracting game data:\n{ex.Message}",
+									   "Error",
+									   MessageBoxButton.OK,
+									   MessageBoxImage.Error);
+					}
+				}
+				return;
+			}
+
 			if (!_filePathMap.TryGetValue(treeViewItem, out var fileEntry))
 			{
 				MessageBox.Show("Please select a file to extract.",
@@ -1237,7 +1332,7 @@ namespace DescentView
 			}
 
 			var fileName = Path.GetFileName(fileEntry.RelativePath);
-			var dialog = new Microsoft.Win32.SaveFileDialog
+			var dialog2 = new Microsoft.Win32.SaveFileDialog
 			{
 				FileName = fileName,
 				Filter = "All Files (*.*)|*.*",
@@ -1247,13 +1342,13 @@ namespace DescentView
 			// Set initial directory from last used save folder
 			if (!string.IsNullOrEmpty(_lastSaveFolder) && Directory.Exists(_lastSaveFolder))
 			{
-				dialog.InitialDirectory = _lastSaveFolder;
+				dialog2.InitialDirectory = _lastSaveFolder;
 			}
 
-			if (dialog.ShowDialog() == true)
+			if (dialog2.ShowDialog() == true)
 			{
 				// Save the folder for next time
-				var folder = Path.GetDirectoryName(dialog.FileName);
+				var folder = Path.GetDirectoryName(dialog2.FileName);
 				if (!string.IsNullOrEmpty(folder))
 				{
 					_lastSaveFolder = folder;
@@ -1261,8 +1356,8 @@ namespace DescentView
 
 				try
 				{
-					File.WriteAllBytes(dialog.FileName, fileData);
-					MessageBox.Show($"File extracted successfully to:\n{dialog.FileName}",
+					File.WriteAllBytes(dialog2.FileName, fileData);
+					MessageBox.Show($"File extracted successfully to:\n{dialog2.FileName}",
 								   "Success",
 								   MessageBoxButton.OK,
 								   MessageBoxImage.Information);
@@ -1536,6 +1631,79 @@ namespace DescentView
 			return fileEntry.Data;
 		}
 
+		private void DisplayGameData(D1PigGameData gameData)
+		{
+			try
+			{
+				ShowPaletteSelector(false);
+				TextScrollViewer.Visibility = Visibility.Visible;
+				ImageContentGrid.Visibility = Visibility.Collapsed;
+				AudioContentGrid.Visibility = Visibility.Collapsed;
+				ViewTogglePanel.Visibility = Visibility.Collapsed;
+
+				var textContent = FormatGameDataAsText(gameData);
+				ContentTextBox.Text = textContent;
+				FileInfoTextBlock.Text = "Game Data";
+				TextScrollViewer.ScrollToHome();
+			}
+			catch (Exception ex)
+			{
+				TextScrollViewer.Visibility = Visibility.Visible;
+				ImageContentGrid.Visibility = Visibility.Collapsed;
+				AudioContentGrid.Visibility = Visibility.Collapsed;
+				ContentTextBox.Text = $"Error displaying game data:\n{ex.Message}\n\nStack trace:\n{ex.StackTrace}";
+				TextScrollViewer.ScrollToHome();
+			}
+		}
+
+		private string FormatGameDataAsText(D1PigGameData gameData)
+		{
+			var sb = new StringBuilder();
+			FormatObjectProperties(sb, gameData, 0);
+			return sb.ToString();
+		}
+
+		private void FormatObjectProperties(StringBuilder sb, object obj, int indentLevel)
+		{
+			var indent = new string(' ', indentLevel * 2);
+			var type = obj.GetType();
+
+			foreach (var prop in type.GetProperties())
+			{
+				var value = prop.GetValue(obj);
+				var name = prop.Name;
+
+				if (value == null)
+				{
+					sb.AppendLine($"{indent}{name}: (null)");
+				}
+				else if (value is byte[] bytes)
+				{
+					sb.AppendLine($"{indent}{name}: {bytes.Length} bytes");
+				}
+				else if (value is int[] intArray)
+				{
+					sb.AppendLine($"{indent}{name}: {intArray.Length} entries");
+				}
+				else if (value is Array array)
+				{
+					sb.AppendLine($"{indent}{name}: {array.Length} entries");
+				}
+				else if (value is System.Collections.IList list)
+				{
+					sb.AppendLine($"{indent}{name}: {list.Count} items");
+				}
+				else if (prop.PropertyType.IsClass && prop.PropertyType != typeof(string))
+				{
+					sb.AppendLine($"{indent}{name}:");
+					FormatObjectProperties(sb, value, indentLevel + 1);
+				}
+				else
+				{
+					sb.AppendLine($"{indent}{name}: {value}");
+				}
+			}
+		}
 
 		private void DisplayImage(byte[] imageData, string extension)
 		{
