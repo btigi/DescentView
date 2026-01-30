@@ -17,7 +17,9 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Input;
 using System.Windows.Media.Imaging;
+using System.Windows.Media.Media3D;
 using System.Windows.Threading;
 
 namespace DescentView
@@ -138,6 +140,13 @@ namespace DescentView
 		// Game data state (for PIG files)
 		private D1PigGameData? _currentGameData;
 		private Dictionary<TreeViewItem, D1PigGameData> _gameDataMap = new();
+
+		// RDL 3D viewer state
+		private double _rotationXRdl3D = 20;
+		private double _rotationYRdl3D = 30;
+		private double _initialRdl3DCameraDistance = 500;
+		private bool _isRotatingRdl3D = false;
+		private System.Windows.Point _lastMousePositionRdl3D;
 
 		public MainWindow(string? filePath = null)
 		{
@@ -560,9 +569,9 @@ namespace DescentView
 					{
 						var processor = new PigProcessor();
 						var (images, sounds, data) = processor.ReadDetailed(filePath);
-						
+
 						_currentGameData = data;
-						
+
 						archiveFiles = images.Select(img => new ArchiveFileEntry
 						{
 							FileName = img.Filename,
@@ -1261,6 +1270,7 @@ namespace DescentView
 				TextScrollViewer.Visibility = Visibility.Visible;
 				ImageContentGrid.Visibility = Visibility.Collapsed;
 				AudioContentGrid.Visibility = Visibility.Collapsed;
+				Rdl3DContentGrid.Visibility = Visibility.Collapsed;
 			}
 		}
 
@@ -1399,6 +1409,7 @@ namespace DescentView
 			TextScrollViewer.Visibility = Visibility.Visible;
 			ImageContentGrid.Visibility = Visibility.Collapsed;
 			AudioContentGrid.Visibility = Visibility.Collapsed;
+			Rdl3DContentGrid.Visibility = Visibility.Collapsed;
 
 			ContentTextBox.Text = FormatHexDump(_currentFileData, _currentFileEntry.RelativePath);
 			TextScrollViewer.ScrollToHome();
@@ -1435,6 +1446,7 @@ namespace DescentView
 					TextScrollViewer.Visibility = Visibility.Visible;
 					ImageContentGrid.Visibility = Visibility.Collapsed;
 					AudioContentGrid.Visibility = Visibility.Collapsed;
+					Rdl3DContentGrid.Visibility = Visibility.Collapsed;
 					ContentTextBox.Text = "(empty file)";
 					ViewTogglePanel.Visibility = Visibility.Collapsed;
 					TextScrollViewer.ScrollToHome();
@@ -1480,6 +1492,7 @@ namespace DescentView
 					TextScrollViewer.Visibility = Visibility.Visible;
 					ImageContentGrid.Visibility = Visibility.Collapsed;
 					AudioContentGrid.Visibility = Visibility.Collapsed;
+					Rdl3DContentGrid.Visibility = Visibility.Collapsed;
 					ContentTextBox.Text = "(empty file)";
 					ViewTogglePanel.Visibility = Visibility.Collapsed;
 					TextScrollViewer.ScrollToHome();
@@ -1512,6 +1525,7 @@ namespace DescentView
 				TextScrollViewer.Visibility = Visibility.Visible;
 				ImageContentGrid.Visibility = Visibility.Collapsed;
 				AudioContentGrid.Visibility = Visibility.Collapsed;
+				Rdl3DContentGrid.Visibility = Visibility.Collapsed;
 				ContentTextBox.Text = $"Error reading file:\n{ex.Message}\n\nStack trace:\n{ex.StackTrace}";
 				TextScrollViewer.ScrollToHome();
 			}
@@ -1528,6 +1542,7 @@ namespace DescentView
 					TextScrollViewer.Visibility = Visibility.Visible;
 					ImageContentGrid.Visibility = Visibility.Collapsed;
 					AudioContentGrid.Visibility = Visibility.Collapsed;
+					Rdl3DContentGrid.Visibility = Visibility.Collapsed;
 					ContentTextBox.Text = "(empty file)";
 					TextScrollViewer.ScrollToHome();
 					return;
@@ -1566,14 +1581,21 @@ namespace DescentView
 					return;
 				}
 
-			ShowPaletteSelector(false);
-			TextScrollViewer.Visibility = Visibility.Visible;
-			ImageContentGrid.Visibility = Visibility.Collapsed;
-			AudioContentGrid.Visibility = Visibility.Collapsed;
+				if (extension == ".rdl")
+				{
+					DisplayRdl(fileData);
+					return;
+				}
 
-			try
-			{
-				string content;
+				ShowPaletteSelector(false);
+				TextScrollViewer.Visibility = Visibility.Visible;
+				ImageContentGrid.Visibility = Visibility.Collapsed;
+				AudioContentGrid.Visibility = Visibility.Collapsed;
+				Rdl3DContentGrid.Visibility = Visibility.Collapsed;
+
+				try
+				{
+					string content;
 					var encoding = Encoding.GetEncoding(1252);
 					switch (extension)
 					{
@@ -1612,6 +1634,7 @@ namespace DescentView
 					TextScrollViewer.Visibility = Visibility.Visible;
 					ImageContentGrid.Visibility = Visibility.Collapsed;
 					AudioContentGrid.Visibility = Visibility.Collapsed;
+					Rdl3DContentGrid.Visibility = Visibility.Collapsed;
 					ContentTextBox.Text = $"Error processing file:\n{ex.Message}\n\nStack trace:\n{ex.StackTrace}";
 					TextScrollViewer.ScrollToHome();
 				}
@@ -1621,6 +1644,7 @@ namespace DescentView
 				TextScrollViewer.Visibility = Visibility.Visible;
 				ImageContentGrid.Visibility = Visibility.Collapsed;
 				AudioContentGrid.Visibility = Visibility.Collapsed;
+				Rdl3DContentGrid.Visibility = Visibility.Collapsed;
 				ContentTextBox.Text = $"Error reading file:\n{ex.Message}\n\nStack trace:\n{ex.StackTrace}";
 				TextScrollViewer.ScrollToHome();
 			}
@@ -1639,6 +1663,7 @@ namespace DescentView
 				TextScrollViewer.Visibility = Visibility.Visible;
 				ImageContentGrid.Visibility = Visibility.Collapsed;
 				AudioContentGrid.Visibility = Visibility.Collapsed;
+				Rdl3DContentGrid.Visibility = Visibility.Collapsed;
 				ViewTogglePanel.Visibility = Visibility.Collapsed;
 
 				var textContent = FormatGameDataAsText(gameData);
@@ -1651,6 +1676,7 @@ namespace DescentView
 				TextScrollViewer.Visibility = Visibility.Visible;
 				ImageContentGrid.Visibility = Visibility.Collapsed;
 				AudioContentGrid.Visibility = Visibility.Collapsed;
+				Rdl3DContentGrid.Visibility = Visibility.Collapsed;
 				ContentTextBox.Text = $"Error displaying game data:\n{ex.Message}\n\nStack trace:\n{ex.StackTrace}";
 				TextScrollViewer.ScrollToHome();
 			}
@@ -1727,6 +1753,7 @@ namespace DescentView
 
 				TextScrollViewer.Visibility = Visibility.Collapsed;
 				AudioContentGrid.Visibility = Visibility.Collapsed;
+				Rdl3DContentGrid.Visibility = Visibility.Collapsed;
 				ImageContentGrid.Visibility = Visibility.Visible;
 
 				// Hide palette selector by default (BBM/IFF will show it)
@@ -1849,6 +1876,7 @@ namespace DescentView
 					TextScrollViewer.Visibility = Visibility.Visible;
 					ImageContentGrid.Visibility = Visibility.Collapsed;
 					AudioContentGrid.Visibility = Visibility.Collapsed;
+					Rdl3DContentGrid.Visibility = Visibility.Collapsed;
 					ContentTextBox.Text = $"Could not display image: {extension}\n\n{imageInfo ?? ""}";
 					TextScrollViewer.ScrollToHome();
 				}
@@ -1858,6 +1886,7 @@ namespace DescentView
 				TextScrollViewer.Visibility = Visibility.Visible;
 				ImageContentGrid.Visibility = Visibility.Collapsed;
 				AudioContentGrid.Visibility = Visibility.Collapsed;
+				Rdl3DContentGrid.Visibility = Visibility.Collapsed;
 				ContentTextBox.Text = $"Error displaying image:\n{ex.Message}\n\nStack trace:\n{ex.StackTrace}";
 				TextScrollViewer.ScrollToHome();
 			}
@@ -2043,6 +2072,7 @@ namespace DescentView
 			{
 				TextScrollViewer.Visibility = Visibility.Visible;
 				AudioContentGrid.Visibility = Visibility.Collapsed;
+				Rdl3DContentGrid.Visibility = Visibility.Collapsed;
 				ContentTextBox.Text = $"Error loading audio:\n{ex.Message}\n\nStack trace:\n{ex.StackTrace}";
 				TextScrollViewer.ScrollToHome();
 
@@ -2112,6 +2142,7 @@ namespace DescentView
 			{
 				TextScrollViewer.Visibility = Visibility.Visible;
 				AudioContentGrid.Visibility = Visibility.Collapsed;
+				Rdl3DContentGrid.Visibility = Visibility.Collapsed;
 				ContentTextBox.Text = $"Error loading MIDI:\n{ex.Message}\n\nStack trace:\n{ex.StackTrace}";
 				TextScrollViewer.ScrollToHome();
 
@@ -2129,6 +2160,7 @@ namespace DescentView
 				ShowPaletteSelector(false);
 				TextScrollViewer.Visibility = Visibility.Collapsed;
 				AudioContentGrid.Visibility = Visibility.Collapsed;
+				Rdl3DContentGrid.Visibility = Visibility.Collapsed;
 				ImageContentGrid.Visibility = Visibility.Visible;
 
 				var fntProcessor = new FntProcessor();
@@ -2194,6 +2226,7 @@ namespace DescentView
 				TextScrollViewer.Visibility = Visibility.Visible;
 				ImageContentGrid.Visibility = Visibility.Collapsed;
 				AudioContentGrid.Visibility = Visibility.Collapsed;
+				Rdl3DContentGrid.Visibility = Visibility.Collapsed;
 				ContentTextBox.Text = $"Error displaying font:\n{ex.Message}\n\nStack trace:\n{ex.StackTrace}";
 				TextScrollViewer.ScrollToHome();
 			}
@@ -2206,6 +2239,7 @@ namespace DescentView
 				ShowPaletteSelector(false);
 				TextScrollViewer.Visibility = Visibility.Collapsed;
 				AudioContentGrid.Visibility = Visibility.Collapsed;
+				Rdl3DContentGrid.Visibility = Visibility.Collapsed;
 				ImageContentGrid.Visibility = Visibility.Visible;
 
 				var processor = new TwoFiveSixProcessor();
@@ -2262,8 +2296,201 @@ namespace DescentView
 				TextScrollViewer.Visibility = Visibility.Visible;
 				ImageContentGrid.Visibility = Visibility.Collapsed;
 				AudioContentGrid.Visibility = Visibility.Collapsed;
+				Rdl3DContentGrid.Visibility = Visibility.Collapsed;
 				ContentTextBox.Text = $"Error displaying palette:\n{ex.Message}\n\nStack trace:\n{ex.StackTrace}";
 				TextScrollViewer.ScrollToHome();
+			}
+		}
+
+		private void DisplayRdl(byte[] rdlData)
+		{
+			try
+			{
+				StopAudio(disposeResources: true);
+
+				ShowPaletteSelector(false);
+				TextScrollViewer.Visibility = Visibility.Collapsed;
+				ImageContentGrid.Visibility = Visibility.Collapsed;
+				AudioContentGrid.Visibility = Visibility.Collapsed;
+				Rdl3DContentGrid.Visibility = Visibility.Visible;
+
+				Rdl3DViewportBorder.MouseLeftButtonDown -= Rdl3DViewport_MouseLeftButtonDown;
+				Rdl3DViewportBorder.MouseMove -= Rdl3DViewport_MouseMove;
+				Rdl3DViewportBorder.MouseLeftButtonUp -= Rdl3DViewport_MouseLeftButtonUp;
+				Rdl3DViewportBorder.MouseWheel -= Rdl3DViewport_MouseWheel;
+
+				var processor = new RdlProcessor();
+				RdlFile rdl;
+				try
+				{
+					rdl = processor.Read(rdlData);
+				}
+				catch (Exception ex)
+				{
+					TextScrollViewer.Visibility = Visibility.Visible;
+					Rdl3DContentGrid.Visibility = Visibility.Collapsed;
+					ContentTextBox.Text = $"Error reading RDL file:\n{ex.Message}";
+					TextScrollViewer.ScrollToHome();
+					return;
+				}
+
+				if (rdl.Vertices.Count == 0 || rdl.Segments.Count == 0)
+				{
+					TextScrollViewer.Visibility = Visibility.Visible;
+					Rdl3DContentGrid.Visibility = Visibility.Collapsed;
+					ContentTextBox.Text = "RDL file contains no vertices or segments.";
+					TextScrollViewer.ScrollToHome();
+					return;
+				}
+
+				var bounds = RdlWireframeConverter.GetBounds(rdl);
+				var center = new Point3D(
+					(bounds.Min.X + bounds.Max.X) / 2,
+					(bounds.Min.Y + bounds.Max.Y) / 2,
+					(bounds.Min.Z + bounds.Max.Z) / 2
+				);
+				var size = new Vector3D(
+					bounds.Max.X - bounds.Min.X,
+					bounds.Max.Y - bounds.Min.Y,
+					bounds.Max.Z - bounds.Min.Z
+				);
+				var maxDimension = Math.Max(Math.Max(size.X, size.Y), size.Z);
+				_initialRdl3DCameraDistance = Math.Max(100, maxDimension * 2.5);
+				var lineThickness = Math.Max(0.5, maxDimension * 0.002);
+
+				var modelGroup = RdlWireframeConverter.BuildWireframe(rdl, lineThickness);
+				var centerTransform = new TranslateTransform3D(-center.X, -center.Y, -center.Z);
+
+				_rotationXRdl3D = 20;
+				_rotationYRdl3D = 30;
+				ResetRdl3DCamera();
+
+				var transformGroup = new Transform3DGroup();
+				transformGroup.Children.Add(centerTransform);
+				transformGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), _rotationXRdl3D)));
+				transformGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), _rotationYRdl3D)));
+				modelGroup.Transform = transformGroup;
+
+				Rdl3DContainer.Content = modelGroup;
+
+				Rdl3DViewportBorder.MouseLeftButtonDown += Rdl3DViewport_MouseLeftButtonDown;
+				Rdl3DViewportBorder.MouseMove += Rdl3DViewport_MouseMove;
+				Rdl3DViewportBorder.MouseLeftButtonUp += Rdl3DViewport_MouseLeftButtonUp;
+				Rdl3DViewportBorder.MouseWheel += Rdl3DViewport_MouseWheel;
+
+				UpdateRdl3DRotation();
+
+				Rdl3DZoomSlider.Value = 1.0;
+				if (Rdl3DZoomValueTextBlock != null)
+					Rdl3DZoomValueTextBlock.Text = "100%";
+
+				FileInfoTextBlock.Text = RdlWireframeConverter.GetModelInfo(rdl);
+			}
+			catch (Exception ex)
+			{
+				TextScrollViewer.Visibility = Visibility.Visible;
+				Rdl3DContentGrid.Visibility = Visibility.Collapsed;
+				ContentTextBox.Text = $"Error displaying RDL:\n{ex.Message}\n\nStack trace:\n{ex.StackTrace}";
+				TextScrollViewer.ScrollToHome();
+			}
+		}
+
+		private void ResetRdl3DCamera()
+		{
+			if (Rdl3DCamera != null)
+			{
+				Rdl3DCamera.Position = new Point3D(0, 0, _initialRdl3DCameraDistance);
+				Rdl3DCamera.LookDirection = new Vector3D(0, 0, -1);
+				Rdl3DCamera.UpDirection = new Vector3D(0, 1, 0);
+				Rdl3DCamera.FieldOfView = 60;
+			}
+		}
+
+		private void Rdl3DZoomSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+		{
+			if (Rdl3DCamera != null && _initialRdl3DCameraDistance > 0)
+			{
+				var cameraDistance = _initialRdl3DCameraDistance / e.NewValue;
+				Rdl3DCamera.Position = new Point3D(0, 0, cameraDistance);
+			}
+			if (Rdl3DZoomValueTextBlock != null)
+			{
+				var zoomPercent = (int)(e.NewValue * 100);
+				Rdl3DZoomValueTextBlock.Text = $"{zoomPercent}%";
+			}
+		}
+
+		private void Rdl3DViewport_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+		{
+			_isRotatingRdl3D = true;
+			_lastMousePositionRdl3D = e.GetPosition(Rdl3DViewportBorder);
+			Rdl3DViewportBorder.CaptureMouse();
+		}
+
+		private void Rdl3DViewport_MouseMove(object sender, MouseEventArgs e)
+		{
+			if (_isRotatingRdl3D && e.LeftButton == MouseButtonState.Pressed)
+			{
+				var currentPosition = e.GetPosition(Rdl3DViewportBorder);
+				var delta = currentPosition - _lastMousePositionRdl3D;
+
+				_rotationYRdl3D += delta.X * 0.5;
+				_rotationXRdl3D += delta.Y * 0.5;
+				_rotationXRdl3D = Math.Max(-89, Math.Min(89, _rotationXRdl3D));
+
+				UpdateRdl3DRotation();
+				_lastMousePositionRdl3D = currentPosition;
+			}
+		}
+
+		private void Rdl3DViewport_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+		{
+			_isRotatingRdl3D = false;
+			Rdl3DViewportBorder.ReleaseMouseCapture();
+		}
+
+		private void Rdl3DViewport_MouseWheel(object sender, MouseWheelEventArgs e)
+		{
+			if (Rdl3DZoomSlider == null)
+				return;
+			var delta = e.Delta > 0 ? 0.15 : -0.15;
+			var newValue = Rdl3DZoomSlider.Value + delta;
+			newValue = Math.Max(Rdl3DZoomSlider.Minimum, Math.Min(Rdl3DZoomSlider.Maximum, newValue));
+			Rdl3DZoomSlider.Value = newValue;
+		}
+
+		private void Rdl3DResetViewButton_Click(object sender, RoutedEventArgs e)
+		{
+			_rotationXRdl3D = 20;
+			_rotationYRdl3D = 30;
+			ResetRdl3DCamera();
+			if (Rdl3DZoomSlider != null)
+			{
+				Rdl3DZoomSlider.Value = 1.0;
+			}
+			if (Rdl3DZoomValueTextBlock != null)
+			{
+				Rdl3DZoomValueTextBlock.Text = "100%";
+			}
+			UpdateRdl3DRotation();
+		}
+
+		private void UpdateRdl3DRotation()
+		{
+			if (Rdl3DContainer.Content is Model3DGroup modelGroup)
+			{
+				var transforms = new Transform3DGroup();
+				if (modelGroup.Transform is Transform3DGroup existingGroup && existingGroup.Children.Count > 0)
+				{
+					transforms.Children.Add(existingGroup.Children[0]);
+				}
+				else if (modelGroup.Transform is TranslateTransform3D existingTranslate)
+				{
+					transforms.Children.Add(existingTranslate);
+				}
+				transforms.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), _rotationXRdl3D)));
+				transforms.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), _rotationYRdl3D)));
+				modelGroup.Transform = transforms;
 			}
 		}
 

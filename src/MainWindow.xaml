@@ -330,6 +330,84 @@
                             </Grid>
                         </Border>
                     </Grid>
+                    
+                    <!-- RDL 3D mine wireframe content -->
+                    <Grid x:Name="Rdl3DContentGrid" Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        
+                        <Border Grid.Row="0" 
+                               Background="{DynamicResource MahApps.Brushes.ThemeBackground}">
+                            <Border x:Name="Rdl3DViewportBorder" Background="Transparent">
+                                <Viewport3D x:Name="Rdl3DViewport">
+                                <Viewport3D.Camera>
+                                    <PerspectiveCamera x:Name="Rdl3DCamera" 
+                                                      Position="0,0,500" 
+                                                      LookDirection="0,0,-1" 
+                                                      UpDirection="0,1,0" 
+                                                      FieldOfView="60"/>
+                                </Viewport3D.Camera>
+                                
+                                <ModelVisual3D>
+                                    <ModelVisual3D.Content>
+                                        <Model3DGroup>
+                                            <AmbientLight Color="#404040"/>
+                                            <DirectionalLight Color="#C0C0C0" Direction="1,-1,-1"/>
+                                            <DirectionalLight Color="#606060" Direction="-1,-1,-1"/>
+                                        </Model3DGroup>
+                                    </ModelVisual3D.Content>
+                                </ModelVisual3D>
+                                
+                                <ModelVisual3D x:Name="Rdl3DContainer"/>
+                            </Viewport3D>
+                        </Border>
+                        </Border>
+                        
+                        <!-- Zoom slider along bottom -->
+                        <Border Grid.Row="1" 
+                               Background="{DynamicResource MahApps.Brushes.Gray8}" 
+                               Padding="10">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                
+                                <Button x:Name="Rdl3DResetViewButton"
+                                       Grid.Column="0"
+                                       Content="Reset view"
+                                       Margin="0,0,15,0"
+                                       Padding="8,4"
+                                       Click="Rdl3DResetViewButton_Click"/>
+                                
+                                <TextBlock Grid.Column="1" 
+                                          Text="Zoom:" 
+                                          VerticalAlignment="Center"
+                                          Margin="0,0,10,0"
+                                          Foreground="{DynamicResource MahApps.Brushes.ThemeForeground}"/>
+                                
+                                <Slider x:Name="Rdl3DZoomSlider"
+                                       Grid.Column="2"
+                                       Minimum="0.1"
+                                       Maximum="10.0"
+                                       Value="1.0"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,10,0"
+                                       ValueChanged="Rdl3DZoomSlider_ValueChanged"/>
+                                
+                                <TextBlock x:Name="Rdl3DZoomValueTextBlock"
+                                          Grid.Column="3"
+                                          Text="100%"
+                                          VerticalAlignment="Center"
+                                          MinWidth="50"
+                                          Foreground="{DynamicResource MahApps.Brushes.ThemeForeground}"/>
+                            </Grid>
+                        </Border>
+                    </Grid>
                 </Grid>
             </Grid>
         </Grid>
