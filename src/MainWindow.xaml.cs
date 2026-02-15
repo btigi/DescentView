@@ -568,9 +568,9 @@ namespace DescentView
 					if (_isPigFile)
 					{
 						var processor = new PigProcessor();
-						var (images, sounds, data) = processor.ReadDetailed(filePath);
+						var (images, sounds, pofFiles, gameData) = processor.ReadDetailed(filePath);
 
-						_currentGameData = data;
+						_currentGameData = gameData;
 
 						archiveFiles = images.Select(img => new ArchiveFileEntry
 						{
@@ -588,6 +588,13 @@ namespace DescentView
 							FileName = s.Filename,
 							RelativePath = s.Filename,
 							Data = s.Data
+						}));
+						// Add POF files to archive files
+						archiveFiles.AddRange(pofFiles.Select(p => new ArchiveFileEntry
+						{
+							FileName = p.filename,
+							RelativePath = p.filename,
+							Data = p.data
 						}));
 					}
 					else
@@ -1587,6 +1594,12 @@ namespace DescentView
 					return;
 				}
 
+				if (extension == ".pof")
+				{
+					DisplayPof(fileData);
+					return;
+				}
+
 				ShowPaletteSelector(false);
 				TextScrollViewer.Visibility = Visibility.Visible;
 				ImageContentGrid.Visibility = Visibility.Collapsed;
@@ -2302,6 +2315,90 @@ namespace DescentView
 			}
 		}
 
+		private void DisplayPof(byte[] pofData)
+		{
+			try
+			{
+				StopAudio(disposeResources: true);
+
+				ShowPaletteSelector(false);
+				TextScrollViewer.Visibility = Visibility.Collapsed;
+				ImageContentGrid.Visibility = Visibility.Collapsed;
+				AudioContentGrid.Visibility = Visibility.Collapsed;
+				Rdl3DContentGrid.Visibility = Visibility.Visible;
+
+				Rdl3DViewportBorder.MouseLeftButtonDown -= Rdl3DViewport_MouseLeftButtonDown;
+				Rdl3DViewportBorder.MouseMove -= Rdl3DViewport_MouseMove;
+				Rdl3DViewportBorder.MouseLeftButtonUp -= Rdl3DViewport_MouseLeftButtonUp;
+				Rdl3DViewportBorder.MouseWheel -= Rdl3DViewport_MouseWheel;
+
+				PolyModel model;
+				try
+				{
+					var processor = new PofProcessor();
+					model = processor.Read(pofData);
+				}
+				catch (Exception ex)
+				{
+					TextScrollViewer.Visibility = Visibility.Visible;
+					Rdl3DContentGrid.Visibility = Visibility.Collapsed;
+					ContentTextBox.Text = $"Error reading POF file:\n{ex.Message}";
+					TextScrollViewer.ScrollToHome();
+					return;
+				}
+
+				var bounds = PofWireframeConverter.GetBounds(model);
+				var center = new Point3D(
+					(bounds.Min.X + bounds.Max.X) / 2,
+					(bounds.Min.Y + bounds.Max.Y) / 2,
+					(bounds.Min.Z + bounds.Max.Z) / 2
+				);
+				var size = new Vector3D(
+					bounds.Max.X - bounds.Min.X,
+					bounds.Max.Y - bounds.Min.Y,
+					bounds.Max.Z - bounds.Min.Z
+				);
+				var maxDimension = Math.Max(Math.Max(size.X, size.Y), size.Z);
+				_initialRdl3DCameraDistance = Math.Max(100, maxDimension * 2.5) * 0.25; // default 4x closer (400% → 100%)
+				var lineThickness = Math.Max(0.5, maxDimension * 0.002);
+
+				var modelGroup = PofWireframeConverter.BuildWireframe(model, lineThickness);
+				var centerTransform = new TranslateTransform3D(-center.X, -center.Y, -center.Z);
+
+				_rotationXRdl3D = 20;
+				_rotationYRdl3D = 30;
+				ResetRdl3DCamera();
+
+				var transformGroup = new Transform3DGroup();
+				transformGroup.Children.Add(centerTransform);
+				transformGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), _rotationYRdl3D))); // orbit (handlebars)
+				transformGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), _rotationXRdl3D))); // tilt (spit roast)
+				modelGroup.Transform = transformGroup;
+
+				Rdl3DContainer.Content = modelGroup;
+
+				Rdl3DViewportBorder.MouseLeftButtonDown += Rdl3DViewport_MouseLeftButtonDown;
+				Rdl3DViewportBorder.MouseMove += Rdl3DViewport_MouseMove;
+				Rdl3DViewportBorder.MouseLeftButtonUp += Rdl3DViewport_MouseLeftButtonUp;
+				Rdl3DViewportBorder.MouseWheel += Rdl3DViewport_MouseWheel;
+
+				UpdateRdl3DRotation();
+
+				Rdl3DZoomSlider.Value = 1.0;
+				if (Rdl3DZoomValueTextBlock != null)
+					Rdl3DZoomValueTextBlock.Text = "100%";
+
+				FileInfoTextBlock.Text = PofWireframeConverter.GetModelInfo(model);
+			}
+			catch (Exception ex)
+			{
+				TextScrollViewer.Visibility = Visibility.Visible;
+				Rdl3DContentGrid.Visibility = Visibility.Collapsed;
+				ContentTextBox.Text = $"Error displaying POF:\n{ex.Message}\n\nStack trace:\n{ex.StackTrace}";
+				TextScrollViewer.ScrollToHome();
+			}
+		}
+
 		private void DisplayRdl(byte[] rdlData)
 		{
 			try
@@ -2367,8 +2464,8 @@ namespace DescentView
 
 				var transformGroup = new Transform3DGroup();
 				transformGroup.Children.Add(centerTransform);
-				transformGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), _rotationXRdl3D)));
-				transformGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), _rotationYRdl3D)));
+				transformGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), _rotationYRdl3D))); // orbit (handlebars)
+				transformGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), _rotationXRdl3D))); // tilt (spit roast)
 				modelGroup.Transform = transformGroup;
 
 				Rdl3DContainer.Content = modelGroup;
@@ -2488,8 +2585,8 @@ namespace DescentView
 				{
 					transforms.Children.Add(existingTranslate);
 				}
-				transforms.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), _rotationXRdl3D)));
-				transforms.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), _rotationYRdl3D)));
+				transforms.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), _rotationYRdl3D))); // orbit (handlebars)
+				transforms.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), _rotationXRdl3D))); // tilt (spit roast)
 				modelGroup.Transform = transforms;
 			}
 		}
