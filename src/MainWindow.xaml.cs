@@ -164,20 +164,35 @@ namespace DescentView
 			// Populate palette dropdown
 			PopulatePaletteDropdown();
 
-			// Load file if provided via command line
-			if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
+			// Load file if provided via command line, once the window is visible
+			if (!string.IsNullOrEmpty(filePath))
 			{
-				try
-				{
-					LoadArchiveFile(filePath);
-				}
-				catch (Exception ex)
-				{
-					MessageBox.Show($"Error opening archive file:\n{ex.Message}",
-								   "Error",
-								   MessageBoxButton.OK,
-								   MessageBoxImage.Error);
-				}
+				var startupFile = filePath;
+				Loaded += (_, _) => OpenStartupFile(startupFile);
+			}
+		}
+
+		private void OpenStartupFile(string filePath)
+		{
+			if (!File.Exists(filePath))
+			{
+				MessageBox.Show($"File not found:\n{filePath}",
+							   "Error",
+							   MessageBoxButton.OK,
+							   MessageBoxImage.Error);
+				return;
+			}
+
+			try
+			{
+				LoadArchiveFile(filePath);
+			}
+			catch (Exception ex)
+			{
+				MessageBox.Show($"Error opening archive file:\n{ex.Message}",
+							   "Error",
+							   MessageBoxButton.OK,
+							   MessageBoxImage.Error);
 			}
 		}
 

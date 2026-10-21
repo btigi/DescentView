@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Windows;
 
 namespace DescentView
@@ -15,9 +16,16 @@ namespace DescentView
 
             // Check for command-line arguments
             string? filePath = null;
-            if (e.Args.Length > 0)
+            if (e.Args.Length > 0 && !string.IsNullOrWhiteSpace(e.Args[0]))
             {
-                filePath = e.Args[0];
+                try
+                {
+                    filePath = Path.GetFullPath(e.Args[0]);
+                }
+                catch (Exception)
+                {
+                    filePath = e.Args[0];
+                }
             }
 
             // Create and show main window

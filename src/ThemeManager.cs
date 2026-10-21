@@ -2,6 +2,7 @@ using System;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Media;
 
 namespace DescentView
 {
@@ -14,6 +15,8 @@ namespace DescentView
 
         private static readonly Uri DarkThemeUri = new("pack://application:,,,/MahApps.Metro;component/Styles/Themes/Dark.Steel.xaml");
         private static readonly Uri LightThemeUri = new("pack://application:,,,/MahApps.Metro;component/Styles/Themes/Light.Steel.xaml");
+
+        private const string DisabledOverlayKey = "MahApps.Brushes.Control.Disabled";
 
         public static void ApplyTheme(ThemeOption theme)
         {
@@ -56,6 +59,18 @@ namespace DescentView
             else
             {
                 app.Resources.MergedDictionaries.Add(newTheme);
+            }
+
+            // MahApps' disabled overlay is translucent white in both themes, which washes out dark controls
+            if (useDark)
+            {
+                var overlay = new SolidColorBrush(Color.FromArgb(0xA5, 0x25, 0x25, 0x25));
+                overlay.Freeze();
+                app.Resources[DisabledOverlayKey] = overlay;
+            }
+            else
+            {
+                app.Resources.Remove(DisabledOverlayKey);
             }
 
             // Update title bars for all windows
